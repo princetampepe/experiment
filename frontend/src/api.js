@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:8080/api";
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api").replace(/\/$/, "");
 const STORAGE_KEY = "pulse_offline_posts_v1";
 const TOKEN_KEY = "pulse_token_v1";
 const REFRESH_TOKEN_KEY = "pulse_refresh_token_v1";
