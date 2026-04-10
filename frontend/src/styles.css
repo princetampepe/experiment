@@ -737,35 +737,25 @@ body {
 
 @media (max-width: 1120px) {
   .app-shell {
-    grid-template-columns: 86px 1fr;
-  }
-
-  .left-rail {
-    padding: 10px;
-  }
-
-  .brand-wrap div:last-child,
-  .nav-btn,
-  .hero-btn {
-    display: none;
-  }
-
-  .right-col {
-    grid-column: 1 / -1;
-    grid-template-columns: repeat(2, 1fr);
-  }
-}
-
-@media (max-width: 760px) {
-  .app-shell {
-    width: 94vw;
+    width: min(980px, 96vw);
     grid-template-columns: 1fr;
+    gap: 12px;
   }
 
   .left-rail {
     position: static;
-    display: flex;
-    justify-content: center;
+    top: auto;
+    padding: 14px;
+  }
+
+  .main-nav {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .nav-btn,
+  .hero-btn,
+  .actions button {
+    min-height: 44px;
   }
 
   .panel-header {
@@ -784,11 +774,116 @@ body {
     width: 100%;
   }
 
+  .right-col {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .page-bg {
+    padding: 10px 0;
+  }
+
+  .app-shell {
+    width: 100%;
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .left-rail {
+    padding: 12px;
+  }
+
+  .brand-wrap {
+    margin-bottom: 10px;
+  }
+
+  .main-nav {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    padding-bottom: 4px;
+    scrollbar-width: thin;
+  }
+
+  .main-nav .nav-btn {
+    flex: 0 0 auto;
+    min-width: max-content;
+    padding: 10px 14px;
+  }
+
+  .panel-header {
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .header-controls {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .panel-header input {
+    width: 100%;
+  }
+
+  .feed-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+
   .actions {
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .comment-compose {
+    grid-template-columns: 1fr;
+  }
+
+  .comment-compose .hero-btn {
+    width: 100%;
+  }
+
+  .stats-grid {
+    grid-template-columns: 1fr;
   }
 
   .right-col {
+    grid-template-columns: 1fr;
+  }
+
+  .bars {
+    height: 96px;
+  }
+
+  .app-toast {
+    width: calc(100vw - 24px);
+    text-align: center;
+  }
+}
+
+@media (max-width: 420px) {
+  .page-bg {
+    padding: 8px 0;
+  }
+
+  .left-rail,
+  .panel-header,
+  .composer,
+  .card,
+  .post-card {
+    border-radius: 16px;
+  }
+
+  .main-nav .nav-btn {
+    font-size: 0.92rem;
+    padding: 10px 12px;
+  }
+
+  .actions {
     grid-template-columns: 1fr;
   }
 }
