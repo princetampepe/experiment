@@ -25,6 +25,7 @@ import {
 
 const PAGE_SIZE = 10;
 const SKELETON_COUNT = 3;
+const MOBILE_BREAKPOINT = 760;
 
 const navItems = [
   "Home",
@@ -34,6 +35,13 @@ const navItems = [
   "Bookmarks",
   "Lists",
   "Dashboard",
+];
+
+const mobileNavItems = [
+  { view: "Home", label: "Home" },
+  { view: "Explore", label: "Explore" },
+  { view: "Notifications", label: "Alerts" },
+  { view: "Dashboard", label: "Stats" },
 ];
 
 function App() {
@@ -68,6 +76,10 @@ function App() {
     && typeof window.matchMedia === "function"
     && window.matchMedia("(prefers-reduced-motion: reduce)").matches
   );
+  const [isMobileViewport, setIsMobileViewport] = useState(
+    typeof window !== "undefined" && window.innerWidth <= MOBILE_BREAKPOINT
+  );
+  const [showMobileInsights, setShowMobileInsights] = useState(false);
   const [viewMotionKey, setViewMotionKey] = useState(0);
   const [revealedPosts, setRevealedPosts] = useState({});
   const [buttonPulse, setButtonPulse] = useState({});
@@ -150,6 +162,27 @@ function App() {
     return () => mediaQuery.removeListener(handleChange);
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+      return undefined;
+    }
+
+    const mediaQuery = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT}px)`);
+    const handleChange = (event) => {
+      setIsMobileViewport(event.matches);
+    };
+
+    setIsMobileViewport(mediaQuery.matches);
+
+    if (typeof mediaQuery.addEventListener === "function") {
+      mediaQuery.addEventListener("change", handleChange);
+      return () => mediaQuery.removeEventListener("change", handleChange);
+    }
+
+    mediaQuery.addListener(handleChange);
+    return () => mediaQuery.removeListener(handleChange);
+  }, []);
+
   useEffect(() => () => {
     timersRef.current.forEach((timerId) => window.clearTimeout(timerId));
     timersRef.current = [];
@@ -158,6 +191,12 @@ function App() {
   useEffect(() => {
     setViewMotionKey((prev) => prev + 1);
   }, [activeView]);
+
+  useEffect(() => {
+    if (!isMobileViewport || !isFeedView) {
+      setShowMobileInsights(false);
+    }
+  }, [isMobileViewport, isFeedView]);
 
   useEffect(() => {
     if (!isFeedView) {
@@ -488,6 +527,17 @@ function App() {
   }, [activeView, posts]);
 
   const canCompose = activeView === "Home" || activeView === "Explore";
+  const shouldShowRightCol = isFeedView && (!isMobileViewport || showMobileInsights);
+
+  const focusComposer = useCallback(() => {
+    setActiveView("Home");
+    if (typeof window === "undefined") {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      document.getElementById("composer")?.focus();
+    });
+  }, []);
 
   return (
     <div className="page-bg">
@@ -567,7 +617,7 @@ function App() {
             </section>
           )}
 
-          <button type="button" className="hero-btn" onClick={() => document.getElementById("composer")?.focus()}>
+          <button type="button" className="hero-btn" onClick={focusComposer}>
             Quick Post
           </button>
         </aside>
@@ -576,6 +626,15 @@ function App() {
           <header className="glass panel-header">
             <h2>{activeView}</h2>
             <div className="header-controls">
+              {isMobileViewport && isFeedView ? (
+                <button
+                  type="button"
+                  className={`nav-btn ${showMobileInsights ? "active" : ""}`}
+                  onClick={() => setShowMobileInsights((prev) => !prev)}
+                >
+                  {showMobileInsights ? "Hide Insights" : "Show Insights"}
+                </button>
+              ) : null}
               {currentUser && isFeedView ? (
                 <button
                   type="button"
@@ -834,8 +893,8 @@ function App() {
           </div>
         </main>
 
-        {activeView === "Home" || activeView === "Explore" || activeView === "Bookmarks" ? (
-          <aside key={`right-${activeView}-${viewMotionKey}`} className="right-col view-stage side-stage">
+        {shouldShowRightCol ? (
+          <aside key={`right-${activeView}-${viewMotionKey}`} className={`right-col view-stage side-stage ${isMobileViewport ? "mobile-insights" : ""}`}>
           <section className="glass card">
             <h3>Dashboard Snapshot</h3>
             <div className="stats-grid">
@@ -941,6 +1000,32 @@ function App() {
           {toastMessage}
         </div>
       </div>
+
+      {isMobileViewport ? (
+        <nav className="mobile-tabbar glass" aria-label="Mobile quick navigation">
+          {mobileNavItems.map((item) => (
+            <button
+              type="button"
+              key={item.view}
+              className={`mobile-tab ${activeView === item.view ? "active" : ""}`}
+              onClick={() => {
+                setActiveView(item.view);
+                setShowMobileInsights(false);
+              }}
+            >
+              <span>{item.label}</span>
+              {item.view === "Notifications" && unreadCount > 0 ? (
+                <span className="mobile-badge" aria-label={`${unreadCount} unread notifications`}>
+                  {unreadCount}
+                </span>
+              ) : null}
+            </button>
+          ))}
+          <button type="button" className="mobile-compose-btn" onClick={focusComposer}>
+            Post
+          </button>
+        </nav>
+      ) : null}
     </div>
   );
 }
