@@ -91,19 +91,38 @@ public class PostService {
         Post post = repository.findById(postId)
                 .orElseThrow(() -> new IllegalArgumentException("Post not found"));
 
-        switch (action.toLowerCase(Locale.ROOT)) {
-            case "reply" -> post.setReplyCount(post.getReplyCount() + 1);
-            case "repost" -> post.setRepostCount(post.getRepostCount() + 1);
-            case "like" -> post.setLikeCount(post.getLikeCount() + 1);
-            case "bookmark" -> post.setBookmarkCount(post.getBookmarkCount() + 1);
+        String normalizedAction = action.toLowerCase(Locale.ROOT);
+        boolean notifyAuthor = false;
+
+        switch (normalizedAction) {
+            case "reply" -> {
+                post.setReplyCount(post.getReplyCount() + 1);
+                notifyAuthor = true;
+            }
+            case "repost" -> {
+                if (post.getRepostedUserIds().add(principal.id())) {
+                    post.setRepostCount(post.getRepostCount() + 1);
+                    notifyAuthor = true;
+                }
+            }
+            case "like" -> {
+                if (post.getLikedUserIds().add(principal.id())) {
+                    post.setLikeCount(post.getLikeCount() + 1);
+                    notifyAuthor = true;
+                }
+            }
+            case "bookmark" -> {
+                post.setBookmarkCount(post.getBookmarkCount() + 1);
+                notifyAuthor = true;
+            }
             default -> throw new IllegalArgumentException("Unsupported action: " + action);
         }
 
         Post saved = repository.save(post);
         Long authorUserId = saved.getAuthorUserId();
-        if (authorUserId != null && !authorUserId.equals(principal.id())) {
+        if (notifyAuthor && authorUserId != null && !authorUserId.equals(principal.id())) {
             appUserRepository.findById(authorUserId).ifPresent(target ->
-                    createNotification(target, action.toLowerCase(Locale.ROOT), principal.displayName() + " engaged with your post")
+                    createNotification(target, normalizedAction, principal.displayName() + " engaged with your post")
             );
         }
         return toResponse(saved);

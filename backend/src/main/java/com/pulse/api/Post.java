@@ -1,13 +1,20 @@
 package com.pulse.api;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.CollectionTable;
 import jakarta.persistence.Entity;
+import jakarta.persistence.ElementCollection;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 
 import java.time.Instant;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Table(name = "posts")
@@ -40,6 +47,24 @@ public class Post {
 
     @Column(nullable = false)
     private int likeCount;
+
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(
+            name = "post_like_users",
+            joinColumns = @JoinColumn(name = "post_id"),
+            uniqueConstraints = @UniqueConstraint(columnNames = {"post_id", "user_id"})
+    )
+    @Column(name = "user_id", nullable = false)
+    private Set<Long> likedUserIds = new HashSet<>();
+
+    @ElementCollection(fetch = FetchType.LAZY)
+    @CollectionTable(
+            name = "post_repost_users",
+            joinColumns = @JoinColumn(name = "post_id"),
+            uniqueConstraints = @UniqueConstraint(columnNames = {"post_id", "user_id"})
+    )
+    @Column(name = "user_id", nullable = false)
+    private Set<Long> repostedUserIds = new HashSet<>();
 
     @Column(nullable = false)
     private int bookmarkCount;
@@ -117,6 +142,22 @@ public class Post {
 
     public void setLikeCount(int likeCount) {
         this.likeCount = likeCount;
+    }
+
+    public Set<Long> getLikedUserIds() {
+        return likedUserIds;
+    }
+
+    public void setLikedUserIds(Set<Long> likedUserIds) {
+        this.likedUserIds = likedUserIds;
+    }
+
+    public Set<Long> getRepostedUserIds() {
+        return repostedUserIds;
+    }
+
+    public void setRepostedUserIds(Set<Long> repostedUserIds) {
+        this.repostedUserIds = repostedUserIds;
     }
 
     public int getBookmarkCount() {

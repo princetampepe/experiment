@@ -2,6 +2,7 @@ const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/ap
 const STORAGE_KEY = "pulse_offline_posts_v1";
 const TOKEN_KEY = "pulse_token_v1";
 const REFRESH_TOKEN_KEY = "pulse_refresh_token_v1";
+const OFFLINE_ENGAGEMENT_KEY = "pulse_offline_engagement_v1";
 
 const fallbackGaps = [
   {
@@ -201,6 +202,46 @@ function writeOfflinePosts(posts) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(posts));
 }
 
+function readOfflineEngagement() {
+  const raw = localStorage.getItem(OFFLINE_ENGAGEMENT_KEY);
+  if (!raw) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writeOfflineEngagement(state) {
+  localStorage.setItem(OFFLINE_ENGAGEMENT_KEY, JSON.stringify(state));
+}
+
+function getOfflineActorKey() {
+  const token = getToken();
+  if (!token) {
+    return "guest";
+  }
+
+  try {
+    const [, payload] = token.split(".");
+    if (!payload) {
+      return `token:${token.slice(-12)}`;
+    }
+
+    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
+    if (decoded?.sub) {
+      return `user:${decoded.sub}`;
+    }
+    return `token:${token.slice(-12)}`;
+  } catch {
+    return `token:${token.slice(-12)}`;
+  }
+}
+
 function filterPosts(posts, query) {
   const q = query.trim().toLowerCase();
   if (!q) {
@@ -312,6 +353,13 @@ export function engage(postId, action) {
     body: JSON.stringify({ action }),
   }).catch(() => {
     const posts = readOfflinePosts();
+    const offlineEngagement = readOfflineEngagement();
+    const actorKey = getOfflineActorKey();
+    const postKey = String(postId);
+    const actorState = offlineEngagement[actorKey] || {};
+    const postState = actorState[postKey] || { like: false, repost: false };
+    let nextPostState = postState;
+
     const updated = posts.map((post) => {
       if (post.id !== postId) {
         return post;
@@ -321,9 +369,17 @@ export function engage(postId, action) {
         return { ...post, replyCount: post.replyCount + 1 };
       }
       if (action === "repost") {
+        if (postState.repost) {
+          return post;
+        }
+        nextPostState = { ...nextPostState, repost: true };
         return { ...post, repostCount: post.repostCount + 1 };
       }
       if (action === "like") {
+        if (postState.like) {
+          return post;
+        }
+        nextPostState = { ...nextPostState, like: true };
         return { ...post, likeCount: post.likeCount + 1 };
       }
       if (action === "bookmark") {
@@ -333,6 +389,15 @@ export function engage(postId, action) {
     });
 
     writeOfflinePosts(updated);
+    if (action === "like" || action === "repost") {
+      writeOfflineEngagement({
+        ...offlineEngagement,
+        [actorKey]: {
+          ...actorState,
+          [postKey]: nextPostState,
+        },
+      });
+    }
     return updated.find((post) => post.id === postId);
   });
 }
