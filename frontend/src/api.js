@@ -142,12 +142,18 @@ function getSeedPosts() {
       content:
         "Rolling out our instant feedback loop. The team shipped from idea to prototype in 48 hours.",
       tags: ["#buildinpublic", "#product"],
+      mediaUrls: ["https://images.unsplash.com/photo-1551434678-e076c223a692?q=80&w=1280&auto=format&fit=crop"],
+      poll: null,
+      parentPostId: null,
       replyCount: 4,
       repostCount: 9,
       likeCount: 27,
       bookmarkCount: 6,
       createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+      editedAt: null,
+      viewCount: 126,
       commentCount: 0,
+      insights: { views: 126, engagementTotal: 46, engagementRate: 36.51 },
     },
     {
       id: 1002,
@@ -156,12 +162,25 @@ function getSeedPosts() {
       content:
         "Small dashboards beat giant reports. If you cannot decide in 30 seconds, it needs less noise.",
       tags: ["#analytics", "#ux"],
+      mediaUrls: [],
+      poll: {
+        options: [
+          { label: "Keep single KPI", votes: 11, percentage: 39.3 },
+          { label: "Show multi-metric", votes: 17, percentage: 60.7 },
+        ],
+        totalVotes: 28,
+        hasVoted: false,
+      },
+      parentPostId: null,
       replyCount: 7,
       repostCount: 15,
       likeCount: 39,
       bookmarkCount: 11,
       createdAt: new Date(Date.now() - 30 * 60 * 1000).toISOString(),
+      editedAt: null,
+      viewCount: 208,
       commentCount: 0,
+      insights: { views: 208, engagementTotal: 72, engagementRate: 34.62 },
     },
     {
       id: 1003,
@@ -170,14 +189,87 @@ function getSeedPosts() {
       content:
         "Just tested a calmer notification design. Attention is a design material, not free inventory.",
       tags: ["#design", "#frontend"],
+      mediaUrls: ["https://images.unsplash.com/photo-1517048676732-d65bc937f952?q=80&w=1280&auto=format&fit=crop"],
+      poll: null,
+      parentPostId: 1001,
       replyCount: 2,
       repostCount: 5,
       likeCount: 20,
       bookmarkCount: 4,
       createdAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      editedAt: null,
+      viewCount: 154,
       commentCount: 0,
+      insights: { views: 154, engagementTotal: 31, engagementRate: 20.13 },
     },
-  ];
+  ].map(ensureOfflinePostShape);
+}
+
+function calculateOfflineInsights(post) {
+  const views = Number(post.viewCount || 0);
+  const engagementTotal = Number(post.likeCount || 0)
+    + Number(post.repostCount || 0)
+    + Number(post.replyCount || 0)
+    + Number(post.bookmarkCount || 0)
+    + Number(post.commentCount || 0);
+  const engagementRate = views === 0
+    ? (engagementTotal === 0 ? 0 : 100)
+    : Number(((engagementTotal * 100) / views).toFixed(2));
+
+  return {
+    views,
+    engagementTotal,
+    engagementRate,
+  };
+}
+
+function ensureOfflinePostShape(post) {
+  const shaped = {
+    ...post,
+    tags: Array.isArray(post.tags) && post.tags.length ? post.tags : ["#update"],
+    mediaUrls: Array.isArray(post.mediaUrls) ? post.mediaUrls : [],
+    poll: post.poll && Array.isArray(post.poll.options)
+      ? {
+          options: post.poll.options.map((option) => ({
+            label: option.label,
+            votes: Number(option.votes || 0),
+            percentage: Number(option.percentage || 0),
+          })),
+          totalVotes: Number(post.poll.totalVotes || 0),
+          hasVoted: Boolean(post.poll.hasVoted),
+        }
+      : null,
+    parentPostId: post.parentPostId ?? null,
+    editedAt: post.editedAt ?? null,
+    commentCount: Number(post.commentCount || 0),
+    viewCount: Number(post.viewCount || 0),
+  };
+
+  return {
+    ...shaped,
+    insights: post.insights || calculateOfflineInsights(shaped),
+  };
+}
+
+function buildOfflinePoll(pollOptions = []) {
+  const cleanedOptions = pollOptions
+    .map((option) => String(option || "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
+
+  if (cleanedOptions.length < 2) {
+    return null;
+  }
+
+  return {
+    options: cleanedOptions.map((label) => ({
+      label,
+      votes: 0,
+      percentage: 0,
+    })),
+    totalVotes: 0,
+    hasVoted: false,
+  };
 }
 
 function readOfflinePosts() {
@@ -190,7 +282,7 @@ function readOfflinePosts() {
 
   try {
     const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : getSeedPosts();
+    return Array.isArray(parsed) ? parsed.map(ensureOfflinePostShape) : getSeedPosts();
   } catch {
     const seed = getSeedPosts();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(seed));
@@ -249,7 +341,8 @@ function filterPosts(posts, query) {
   }
 
   return posts.filter((post) => {
-    const text = `${post.author} ${post.handle} ${post.content} ${post.tags.join(" ")}`.toLowerCase();
+    const tags = Array.isArray(post.tags) ? post.tags.join(" ") : "";
+    const text = `${post.author} ${post.handle} ${post.content} ${tags}`.toLowerCase();
     return text.includes(q);
   });
 }
@@ -324,26 +417,117 @@ export function getPersonalizedFeed(params = {}) {
 export function createPost(payload) {
   return request("/posts", {
     method: "POST",
-    body: JSON.stringify({ content: payload.content, tags: payload.tags }),
+    body: JSON.stringify({
+      content: payload.content,
+      tags: payload.tags,
+      mediaUrls: payload.mediaUrls,
+      pollOptions: payload.pollOptions,
+      parentPostId: payload.parentPostId,
+    }),
   }).catch(() => {
     const posts = readOfflinePosts();
     const id = Date.now();
+    const mediaUrls = Array.isArray(payload.mediaUrls) ? payload.mediaUrls.slice(0, 4) : [];
+    const poll = buildOfflinePoll(Array.isArray(payload.pollOptions) ? payload.pollOptions : []);
     const next = {
       id,
       author: payload.author || "You",
       handle: payload.handle || "@you",
       content: payload.content || "",
       tags: Array.isArray(payload.tags) && payload.tags.length ? payload.tags : ["#update"],
+      mediaUrls,
+      poll,
+      parentPostId: payload.parentPostId ?? null,
       replyCount: 0,
       repostCount: 0,
       likeCount: 0,
       bookmarkCount: 0,
       commentCount: 0,
       createdAt: new Date().toISOString(),
+      editedAt: null,
+      viewCount: 0,
     };
-    const merged = [next, ...posts];
+    const merged = [ensureOfflinePostShape(next), ...posts];
     writeOfflinePosts(merged);
-    return next;
+    return merged[0];
+  });
+}
+
+export function editPost(postId, content) {
+  return request(`/posts/${postId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ content }),
+  }).catch(() => {
+    const posts = readOfflinePosts();
+    const updated = posts.map((post) => {
+      if (post.id !== postId) {
+        return post;
+      }
+
+      const editedPost = ensureOfflinePostShape({
+        ...post,
+        content,
+        editedAt: new Date().toISOString(),
+      });
+      return {
+        ...editedPost,
+        insights: calculateOfflineInsights(editedPost),
+      };
+    });
+
+    writeOfflinePosts(updated);
+    return updated.find((post) => post.id === postId);
+  });
+}
+
+export function votePoll(postId, option) {
+  return request(`/posts/${postId}/poll/vote`, {
+    method: "POST",
+    body: JSON.stringify({ option }),
+  }).catch(() => {
+    const posts = readOfflinePosts();
+    const updated = posts.map((post) => {
+      if (post.id !== postId || !post.poll) {
+        return post;
+      }
+
+      const totalVotes = Number(post.poll.totalVotes || 0) + 1;
+      const options = post.poll.options.map((pollOption) => {
+        const votes = pollOption.label === option ? Number(pollOption.votes || 0) + 1 : Number(pollOption.votes || 0);
+        return {
+          ...pollOption,
+          votes,
+          percentage: totalVotes === 0 ? 0 : Number(((votes * 100) / totalVotes).toFixed(1)),
+        };
+      });
+
+      const nextPost = ensureOfflinePostShape({
+        ...post,
+        poll: {
+          options,
+          totalVotes,
+          hasVoted: true,
+        },
+      });
+
+      return {
+        ...nextPost,
+        insights: calculateOfflineInsights(nextPost),
+      };
+    });
+
+    writeOfflinePosts(updated);
+    return updated.find((post) => post.id === postId);
+  });
+}
+
+export function getPostInsights(postId) {
+  return request(`/posts/${postId}/insights`).catch(() => {
+    const post = readOfflinePosts().find((item) => item.id === postId);
+    if (!post) {
+      return { views: 0, engagementTotal: 0, engagementRate: 0 };
+    }
+    return calculateOfflineInsights(post);
   });
 }
 
@@ -365,27 +549,34 @@ export function engage(postId, action) {
         return post;
       }
 
+      let changedPost = post;
+
       if (action === "reply") {
-        return { ...post, replyCount: post.replyCount + 1 };
+        changedPost = { ...post, replyCount: post.replyCount + 1 };
       }
       if (action === "repost") {
         if (postState.repost) {
           return post;
         }
         nextPostState = { ...nextPostState, repost: true };
-        return { ...post, repostCount: post.repostCount + 1 };
+        changedPost = { ...post, repostCount: post.repostCount + 1 };
       }
       if (action === "like") {
         if (postState.like) {
           return post;
         }
         nextPostState = { ...nextPostState, like: true };
-        return { ...post, likeCount: post.likeCount + 1 };
+        changedPost = { ...post, likeCount: post.likeCount + 1 };
       }
       if (action === "bookmark") {
-        return { ...post, bookmarkCount: post.bookmarkCount + 1 };
+        changedPost = { ...post, bookmarkCount: post.bookmarkCount + 1 };
       }
-      return post;
+
+      const shaped = ensureOfflinePostShape(changedPost);
+      return {
+        ...shaped,
+        insights: calculateOfflineInsights(shaped),
+      };
     });
 
     writeOfflinePosts(updated);
@@ -474,6 +665,29 @@ export function createNotificationStream(onNotification, onError) {
     try {
       const payload = JSON.parse(event.data);
       onNotification(payload);
+    } catch {
+      // Ignore malformed events.
+    }
+  });
+
+  source.onerror = () => {
+    if (onError) {
+      onError();
+    }
+  };
+
+  return source;
+}
+
+export function createFeedStream(onFeedEvent, onError) {
+  const token = getToken();
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
+  const source = new EventSource(`${BASE_URL}/feed/stream${tokenQuery}`);
+
+  source.addEventListener("feed", (event) => {
+    try {
+      const payload = JSON.parse(event.data);
+      onFeedEvent(payload);
     } catch {
       // Ignore malformed events.
     }

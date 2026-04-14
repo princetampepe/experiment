@@ -39,6 +39,21 @@ public class Post {
     @Column(nullable = false, length = 255)
     private String tagsCsv;
 
+    @Column(length = 1200)
+    private String mediaUrlsCsv;
+
+    @Column(length = 600)
+    private String pollOptionsCsv;
+
+    @Column(length = 1200)
+    private String pollVotesCsv;
+
+    @Column(length = 1200)
+    private String pollVoterUserIdsCsv;
+
+    @Column
+    private Long parentPostId;
+
     @Column(nullable = false)
     private int replyCount;
 
@@ -71,6 +86,12 @@ public class Post {
 
     @Column(nullable = false)
     private Instant createdAt;
+
+    @Column
+    private Instant editedAt;
+
+    @Column
+    private Long viewCount;
 
     public Long getId() {
         return id;
@@ -118,6 +139,46 @@ public class Post {
 
     public void setTagsCsv(String tagsCsv) {
         this.tagsCsv = tagsCsv;
+    }
+
+    public String getMediaUrlsCsv() {
+        return mediaUrlsCsv;
+    }
+
+    public void setMediaUrlsCsv(String mediaUrlsCsv) {
+        this.mediaUrlsCsv = mediaUrlsCsv;
+    }
+
+    public String getPollOptionsCsv() {
+        return pollOptionsCsv;
+    }
+
+    public void setPollOptionsCsv(String pollOptionsCsv) {
+        this.pollOptionsCsv = pollOptionsCsv;
+    }
+
+    public String getPollVotesCsv() {
+        return pollVotesCsv;
+    }
+
+    public void setPollVotesCsv(String pollVotesCsv) {
+        this.pollVotesCsv = pollVotesCsv;
+    }
+
+    public String getPollVoterUserIdsCsv() {
+        return pollVoterUserIdsCsv;
+    }
+
+    public void setPollVoterUserIdsCsv(String pollVoterUserIdsCsv) {
+        this.pollVoterUserIdsCsv = pollVoterUserIdsCsv;
+    }
+
+    public Long getParentPostId() {
+        return parentPostId;
+    }
+
+    public void setParentPostId(Long parentPostId) {
+        this.parentPostId = parentPostId;
     }
 
     public int getReplyCount() {
@@ -174,5 +235,21 @@ public class Post {
 
     public void setCreatedAt(Instant createdAt) {
         this.createdAt = createdAt;
+    }
+
+    public Instant getEditedAt() {
+        return editedAt;
+    }
+
+    public void setEditedAt(Instant editedAt) {
+        this.editedAt = editedAt;
+    }
+
+    public long getViewCount() {
+        return viewCount == null ? 0L : viewCount;
+    }
+
+    public void setViewCount(long viewCount) {
+        this.viewCount = viewCount;
     }
 }

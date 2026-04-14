@@ -106,11 +106,18 @@ public class SeedDataConfig {
         post.setAuthorUserId(authorUserId);
         post.setContent(content);
         post.setTagsCsv(tagsCsv);
+        post.setMediaUrlsCsv("");
+        post.setPollOptionsCsv("");
+        post.setPollVotesCsv("");
+        post.setPollVoterUserIdsCsv("");
+        post.setParentPostId(null);
         post.setReplyCount(reply);
         post.setRepostCount(repost);
         post.setLikeCount(like);
         post.setBookmarkCount(bookmark);
         post.setCreatedAt(createdAt);
+        post.setEditedAt(null);
+        post.setViewCount(0);
         return post;
     }
 }

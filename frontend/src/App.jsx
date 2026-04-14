@@ -2,8 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addComment,
   clearSession,
+  createFeedStream,
   createNotificationStream,
   createPost,
+  editPost,
   engage,
   followUser,
   getComments,
@@ -21,11 +23,14 @@ import {
   register,
   setSession,
   unfollowUser,
+  votePoll,
 } from "./api";
 
 const PAGE_SIZE = 10;
 const SKELETON_COUNT = 3;
 const MOBILE_BREAKPOINT = 760;
+const DRAFT_STORAGE_KEY = "pulse_composer_draft_v2";
+const MUTE_WORDS_KEY = "pulse_mute_words_v1";
 
 const navItems = [
   "Home",
@@ -44,6 +49,10 @@ const mobileNavItems = [
   { view: "Dashboard", label: "Stats" },
 ];
 
+function looksLikeImage(url) {
+  return /\.(png|jpg|jpeg|gif|webp|avif|svg)(\?.*)?$/i.test(url || "");
+}
+
 function App() {
   const [activeView, setActiveView] = useState("Home");
   const [posts, setPosts] = useState([]);
@@ -56,6 +65,15 @@ function App() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [compose, setCompose] = useState("");
+  const [composeMedia, setComposeMedia] = useState("");
+  const [composePollA, setComposePollA] = useState("");
+  const [composePollB, setComposePollB] = useState("");
+  const [composeParentPostId, setComposeParentPostId] = useState("");
+  const [editingPostId, setEditingPostId] = useState(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [mutedWordsInput, setMutedWordsInput] = useState("");
+  const [mutedWords, setMutedWords] = useState([]);
+  const [feedLivePulse, setFeedLivePulse] = useState(false);
   const [error, setError] = useState("");
   const [currentUser, setCurrentUser] = useState(null);
   const [authMode, setAuthMode] = useState("login");
@@ -88,7 +106,8 @@ function App() {
   const [toastMessage, setToastMessage] = useState("");
 
   const loadMoreRef = useRef(null);
-  const streamRef = useRef(null);
+  const notificationStreamRef = useRef(null);
+  const feedStreamRef = useRef(null);
   const timersRef = useRef([]);
   const charLeft = 280 - compose.length;
   const isFeedView = activeView === "Home" || activeView === "Explore" || activeView === "Bookmarks";
@@ -199,6 +218,53 @@ function App() {
   }, [isMobileViewport, isFeedView]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      const storedDraft = window.localStorage.getItem(DRAFT_STORAGE_KEY);
+      if (storedDraft) {
+        const parsed = JSON.parse(storedDraft);
+        setCompose(parsed.compose || "");
+        setComposeMedia(parsed.composeMedia || "");
+        setComposePollA(parsed.composePollA || "");
+        setComposePollB(parsed.composePollB || "");
+        setComposeParentPostId(parsed.composeParentPostId || "");
+      }
+    } catch {
+      // Ignore malformed persisted drafts.
+    }
+
+    const savedMuteWords = window.localStorage.getItem(MUTE_WORDS_KEY);
+    if (savedMuteWords) {
+      const words = savedMuteWords
+        .split(",")
+        .map((word) => word.trim().toLowerCase())
+        .filter(Boolean);
+      setMutedWords(words);
+      setMutedWordsInput(words.join(", "));
+    }
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    window.localStorage.setItem(
+      DRAFT_STORAGE_KEY,
+      JSON.stringify({
+        compose,
+        composeMedia,
+        composePollA,
+        composePollB,
+        composeParentPostId,
+      })
+    );
+  }, [compose, composeMedia, composePollA, composePollB, composeParentPostId]);
+
+  useEffect(() => {
     if (!isFeedView) {
       return;
     }
@@ -300,6 +366,33 @@ function App() {
     [showPersonalized, currentUser, debouncedQuery]
   );
 
+  const mergeIncomingPost = useCallback((incomingPost, eventType) => {
+    if (!incomingPost || !incomingPost.id) {
+      return;
+    }
+
+    setPosts((prev) => {
+      const existingIndex = prev.findIndex((post) => post.id === incomingPost.id);
+      if (existingIndex >= 0) {
+        const next = [...prev];
+        next[existingIndex] = { ...next[existingIndex], ...incomingPost };
+        return next;
+      }
+
+      if (eventType === "post_created") {
+        return [incomingPost, ...prev].slice(0, 120);
+      }
+      return prev;
+    });
+
+    if (eventType === "post_created") {
+      setFeedTotal((prev) => prev + 1);
+    }
+
+    setFeedLivePulse(true);
+    scheduleTimeout(() => setFeedLivePulse(false), 450);
+  }, [scheduleTimeout]);
+
   const bootstrap = useCallback(async () => {
     try {
       setError("");
@@ -351,9 +444,9 @@ function App() {
 
   useEffect(() => {
     if (!currentUser) {
-      if (streamRef.current) {
-        streamRef.current.close();
-        streamRef.current = null;
+      if (notificationStreamRef.current) {
+        notificationStreamRef.current.close();
+        notificationStreamRef.current = null;
       }
       return;
     }
@@ -368,13 +461,36 @@ function App() {
       }
     );
 
-    streamRef.current = source;
+    notificationStreamRef.current = source;
     return () => {
       if (source) {
         source.close();
       }
     };
   }, [currentUser]);
+
+  useEffect(() => {
+    if (feedStreamRef.current) {
+      feedStreamRef.current.close();
+      feedStreamRef.current = null;
+    }
+
+    const source = createFeedStream(
+      (eventPayload) => {
+        mergeIncomingPost(eventPayload?.post, eventPayload?.eventType || "post_updated");
+      },
+      () => {
+        // Feed can still be refreshed manually.
+      }
+    );
+
+    feedStreamRef.current = source;
+    return () => {
+      if (source) {
+        source.close();
+      }
+    };
+  }, [mergeIncomingPost]);
 
   async function onPublish() {
     const text = compose.trim();
@@ -383,11 +499,40 @@ function App() {
     }
 
     const tags = (text.match(/#[a-zA-Z0-9_]+/g) || ["#update"]).slice(0, 4);
+    const mediaUrls = composeMedia
+      .split(",")
+      .map((item) => item.trim())
+      .filter((item) => item.startsWith("https://") || item.startsWith("http://"))
+      .slice(0, 4);
+    const pollOptions = [composePollA.trim(), composePollB.trim()].filter(Boolean);
+
+    let parentPostId = null;
+    if (composeParentPostId.trim()) {
+      const parsedParentId = Number(composeParentPostId.trim());
+      if (!Number.isFinite(parsedParentId) || parsedParentId <= 0) {
+        setError("Thread parent id must be a positive number");
+        return;
+      }
+      parentPostId = parsedParentId;
+    }
 
     try {
       setError("");
-      await createPost({ content: text, tags });
+      await createPost({
+        content: text,
+        tags,
+        mediaUrls,
+        pollOptions,
+        parentPostId,
+      });
       setCompose("");
+      setComposeMedia("");
+      setComposePollA("");
+      setComposePollB("");
+      setComposeParentPostId("");
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(DRAFT_STORAGE_KEY);
+      }
       setPublishSuccess(true);
       scheduleTimeout(() => setPublishSuccess(false), 420);
       triggerToast("Post published");
@@ -395,6 +540,20 @@ function App() {
     } catch (err) {
       setError(err.message || "Failed to publish");
     }
+  }
+
+  function onSaveMutedWords() {
+    const words = mutedWordsInput
+      .split(",")
+      .map((word) => word.trim().toLowerCase())
+      .filter(Boolean)
+      .slice(0, 10);
+
+    setMutedWords(words);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(MUTE_WORDS_KEY, words.join(","));
+    }
+    triggerToast(words.length ? "Mute words saved" : "Mute words cleared");
   }
 
   async function onEngage(postId, action) {
@@ -406,6 +565,45 @@ function App() {
       await Promise.all([loadSidebarData(), loadPostsPage(0, false)]);
     } catch (err) {
       setError(err.message || "Failed to update engagement");
+    }
+  }
+
+  function onStartEdit(post) {
+    setEditingPostId(post.id);
+    setEditDraft(post.content || "");
+  }
+
+  function onCancelEdit() {
+    setEditingPostId(null);
+    setEditDraft("");
+  }
+
+  async function onSaveEdit(postId) {
+    const text = editDraft.trim();
+    if (!text) {
+      return;
+    }
+
+    try {
+      setError("");
+      await editPost(postId, text);
+      setEditingPostId(null);
+      setEditDraft("");
+      triggerToast("Post updated");
+      await Promise.all([loadSidebarData(), loadPostsPage(0, false)]);
+    } catch (err) {
+      setError(err.message || "Failed to edit post");
+    }
+  }
+
+  async function onVotePoll(postId, option) {
+    try {
+      setError("");
+      await votePoll(postId, option);
+      triggerToast("Vote submitted");
+      await loadPostsPage(0, false);
+    } catch (err) {
+      setError(err.message || "Failed to vote in poll");
     }
   }
 
@@ -520,11 +718,19 @@ function App() {
   }, [activeView, debouncedQuery, showPersonalized, currentUser]);
 
   const visiblePosts = useMemo(() => {
-    if (activeView === "Bookmarks") {
-      return posts.filter((post) => post.bookmarkCount > 0);
+    let nextPosts = activeView === "Bookmarks"
+      ? posts.filter((post) => post.bookmarkCount > 0)
+      : posts;
+
+    if (mutedWords.length > 0) {
+      nextPosts = nextPosts.filter((post) => {
+        const text = `${post.author} ${post.handle} ${post.content} ${(post.tags || []).join(" ")}`.toLowerCase();
+        return mutedWords.every((word) => !text.includes(word));
+      });
     }
-    return posts;
-  }, [activeView, posts]);
+
+    return nextPosts;
+  }, [activeView, posts, mutedWords]);
 
   const canCompose = activeView === "Home" || activeView === "Explore";
   const shouldShowRightCol = isFeedView && (!isMobileViewport || showMobileInsights);
@@ -620,11 +826,30 @@ function App() {
           <button type="button" className="hero-btn" onClick={focusComposer}>
             Quick Post
           </button>
+
+          <section className="auth-card mute-card">
+            <h4>Muted Words</h4>
+            <input
+              placeholder="comma,separated,words"
+              value={mutedWordsInput}
+              onChange={(event) => setMutedWordsInput(event.target.value)}
+            />
+            <button type="button" className="nav-btn" onClick={onSaveMutedWords}>
+              Save Filters
+            </button>
+          </section>
         </aside>
 
         <main className="center-col">
           <header className="glass panel-header">
-            <h2>{activeView}</h2>
+            <div className="panel-title-wrap">
+              <h2>{activeView}</h2>
+              {isFeedView ? (
+                <span className={`live-indicator ${feedLivePulse ? "pulse" : ""}`}>
+                  Live Feed
+                </span>
+              ) : null}
+            </div>
             <div className="header-controls">
               {isMobileViewport && isFeedView ? (
                 <button
@@ -667,6 +892,28 @@ function App() {
                 onChange={(event) => setCompose(event.target.value)}
                 placeholder="Share an update with tags like #product or #frontend"
               />
+              <div className="composer-grid">
+                <input
+                  placeholder="Media URLs (comma separated)"
+                  value={composeMedia}
+                  onChange={(event) => setComposeMedia(event.target.value)}
+                />
+                <input
+                  placeholder="Thread parent id (optional)"
+                  value={composeParentPostId}
+                  onChange={(event) => setComposeParentPostId(event.target.value)}
+                />
+                <input
+                  placeholder="Poll option A"
+                  value={composePollA}
+                  onChange={(event) => setComposePollA(event.target.value)}
+                />
+                <input
+                  placeholder="Poll option B"
+                  value={composePollB}
+                  onChange={(event) => setComposePollB(event.target.value)}
+                />
+              </div>
               <div className="composer-foot">
                 <span className={charLeft < 30 ? "warning" : ""}>{charLeft} characters left</span>
                 <button
@@ -717,16 +964,74 @@ function App() {
                 >
                   <div className="post-top">
                     <div className="avatar" />
-                    <div>
+                    <div className="post-head-copy">
                       <h4>{post.author}</h4>
                       <p>{post.handle}</p>
                     </div>
+                    <div className="post-top-meta">
+                      {post.editedAt ? <small className="edited-badge">Edited</small> : null}
+                      {post.parentPostId ? <small className="thread-badge">Thread #{post.parentPostId}</small> : null}
+                    </div>
                   </div>
 
-                  <p className="content">{post.content}</p>
+                  {editingPostId === post.id ? (
+                    <div className="edit-box">
+                      <textarea
+                        rows={3}
+                        maxLength={280}
+                        value={editDraft}
+                        onChange={(event) => setEditDraft(event.target.value)}
+                      />
+                      <div className="edit-actions">
+                        <button type="button" className="hero-btn" onClick={() => onSaveEdit(post.id)}>
+                          Save Edit
+                        </button>
+                        <button type="button" className="nav-btn" onClick={onCancelEdit}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="content">{post.content}</p>
+                  )}
+
+                  {Array.isArray(post.mediaUrls) && post.mediaUrls.length > 0 ? (
+                    <div className="media-strip">
+                      {post.mediaUrls.map((url) => (
+                        looksLikeImage(url) ? (
+                          <img key={`${post.id}-${url}`} src={url} alt="Post media" loading="lazy" />
+                        ) : (
+                          <a key={`${post.id}-${url}`} href={url} target="_blank" rel="noreferrer">
+                            Open media
+                          </a>
+                        )
+                      ))}
+                    </div>
+                  ) : null}
+
+                  {post.poll ? (
+                    <div className="poll-box">
+                      {post.poll.options.map((option) => (
+                        <button
+                          key={`${post.id}-${option.label}`}
+                          type="button"
+                          className="poll-option"
+                          disabled={post.poll.hasVoted || !currentUser}
+                          onClick={() => onVotePoll(post.id, option.label)}
+                        >
+                          <span>{option.label}</span>
+                          <strong>{option.percentage}%</strong>
+                        </button>
+                      ))}
+                      <small>
+                        {post.poll.totalVotes} votes
+                        {post.poll.hasVoted ? " • You voted" : ""}
+                      </small>
+                    </div>
+                  ) : null}
 
                   <div className="tags">
-                    {post.tags.map((tag) => (
+                    {(post.tags || []).map((tag) => (
                       <span key={`${post.id}-${tag}`}>{tag}</span>
                     ))}
                   </div>
@@ -760,6 +1065,16 @@ function App() {
                     >
                       Save {post.bookmarkCount}
                     </button>
+                    {currentUser && currentUser.handle === post.handle ? (
+                      <button type="button" onClick={() => onStartEdit(post)}>
+                        Edit
+                      </button>
+                    ) : null}
+                  </div>
+
+                  <div className="insights-row">
+                    <small>{post.viewCount ?? post.insights?.views ?? 0} views</small>
+                    <small>{Number(post.insights?.engagementRate || 0).toFixed(1)}% engagement</small>
                   </div>
 
                   <div className="comment-section">

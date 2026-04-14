@@ -15,7 +15,20 @@ public final class PostDtos {
             @Size(max = 60) String author,
             @Size(max = 40) String handle,
             @NotBlank @Size(max = 280) String content,
-            List<String> tags
+            List<String> tags,
+            List<String> mediaUrls,
+            List<String> pollOptions,
+            Long parentPostId
+    ) {
+    }
+
+    public record EditPostRequest(
+            @NotBlank @Size(max = 280) String content
+    ) {
+    }
+
+    public record VotePollRequest(
+            @NotBlank @Size(max = 80) String option
     ) {
     }
 
@@ -63,12 +76,47 @@ public final class PostDtos {
             String handle,
             String content,
             List<String> tags,
+            List<String> mediaUrls,
+            PostPollResponse poll,
+            Long parentPostId,
             int replyCount,
             int repostCount,
             int likeCount,
             int bookmarkCount,
             int commentCount,
-            Instant createdAt
+            Instant createdAt,
+            Instant editedAt,
+            long viewCount,
+            PostInsightsResponse insights
+    ) {
+    }
+
+    public record PostPollResponse(
+            List<PollOptionResponse> options,
+            long totalVotes,
+            boolean hasVoted
+    ) {
+    }
+
+    public record PollOptionResponse(
+            String label,
+            long votes,
+            double percentage
+    ) {
+    }
+
+    public record PostInsightsResponse(
+            long views,
+            long engagementTotal,
+            double engagementRate
+    ) {
+    }
+
+    public record FeedEventResponse(
+            String eventType,
+            Long postId,
+            PostResponse post,
+            Instant occurredAt
     ) {
     }
 

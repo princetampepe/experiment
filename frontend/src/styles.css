@@ -195,6 +195,14 @@ textarea {
   background: rgba(255, 255, 255, 0.08);
 }
 
+.mute-card {
+  margin-top: 12px;
+}
+
+.mute-card h4 {
+  margin: 0;
+}
+
 .auth-card input,
 .comment-compose input,
 .left-rail input {
@@ -353,6 +361,41 @@ textarea {
   align-items: center;
 }
 
+.panel-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.live-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #032433;
+  background: linear-gradient(145deg, #9df3e5, #9dcaff);
+  box-shadow: 0 0 0 0 rgba(157, 243, 229, 0.3);
+}
+
+.live-indicator.pulse {
+  animation: live-pulse 460ms var(--motion-snap);
+}
+
+@keyframes live-pulse {
+  0% {
+    transform: scale(0.92);
+    box-shadow: 0 0 0 0 rgba(157, 243, 229, 0.5);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 0 0 12px rgba(157, 243, 229, 0);
+  }
+}
+
 .header-controls {
   display: flex;
   align-items: center;
@@ -397,6 +440,24 @@ textarea {
 .composer textarea {
   width: 100%;
   resize: vertical;
+}
+
+.composer-grid {
+  margin-top: 10px;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.composer-grid input,
+.edit-box textarea {
+  width: 100%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.11);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 9px 10px;
+  font: inherit;
 }
 
 .composer-foot {
@@ -455,6 +516,33 @@ textarea {
   gap: 10px;
 }
 
+.post-head-copy {
+  min-width: 0;
+}
+
+.post-top-meta {
+  margin-left: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.edited-badge,
+.thread-badge {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+}
+
+.thread-badge {
+  background: rgba(95, 181, 255, 0.2);
+}
+
 .avatar {
   width: 40px;
   height: 40px;
@@ -474,6 +562,75 @@ textarea {
 .content {
   margin: 12px 0;
   line-height: 1.45;
+}
+
+.edit-box {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.media-strip {
+  margin: 10px 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+  gap: 8px;
+}
+
+.media-strip img,
+.media-strip a {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.media-strip img {
+  min-height: 100px;
+  max-height: 220px;
+  object-fit: cover;
+}
+
+.media-strip a {
+  display: grid;
+  place-items: center;
+  color: #dff2ff;
+  text-decoration: none;
+  padding: 16px 12px;
+  font-size: 0.88rem;
+}
+
+.poll-box {
+  margin: 10px 0;
+  display: grid;
+  gap: 7px;
+}
+
+.poll-option {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--ink);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.poll-option:disabled {
+  opacity: 0.82;
+}
+
+.poll-box small {
+  color: var(--muted);
 }
 
 .content,
@@ -500,7 +657,7 @@ textarea {
 
 .actions {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
   gap: 7px;
   margin-top: 12px;
 }
@@ -536,6 +693,15 @@ textarea {
   margin-top: 10px;
   display: grid;
   gap: 8px;
+}
+
+.insights-row {
+  margin-top: 8px;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 0.83rem;
 }
 
 .comment-list {
@@ -836,6 +1002,10 @@ textarea {
     align-items: stretch;
   }
 
+  .panel-title-wrap {
+    justify-content: space-between;
+  }
+
   .header-controls {
     width: 100%;
     flex-direction: column;
@@ -911,6 +1081,10 @@ textarea {
     align-items: stretch;
   }
 
+  .panel-title-wrap {
+    justify-content: space-between;
+  }
+
   .header-controls {
     width: 100%;
     flex-direction: column;
@@ -925,6 +1099,19 @@ textarea {
     flex-direction: column;
     align-items: flex-start;
     gap: 6px;
+  }
+
+  .composer-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .post-top {
+    align-items: flex-start;
+  }
+
+  .post-top-meta {
+    flex-direction: column;
+    align-items: flex-end;
   }
 
   .actions {
@@ -992,6 +1179,11 @@ textarea {
 
   .actions {
     grid-template-columns: 1fr;
+  }
+
+  .insights-row {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .mobile-tabbar {

@@ -1,12 +1,11 @@
 package com.pulse.api;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
-import org.springframework.data.domain.Pageable;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -24,7 +23,12 @@ public class SocialService {
     private final PostCommentRepository postCommentRepository;
     private final PostService postService;
     private final AuthService authService;
-        private final NotificationStreamService notificationStreamService;
+    private final NotificationStreamService notificationStreamService;
+    private final RateLimitService rateLimitService;
+    private final ContentModerationService contentModerationService;
+
+    private final int commentsPerMinute;
+    private final int followsPerMinute;
 
     public SocialService(
             AppUserRepository appUserRepository,
@@ -34,7 +38,11 @@ public class SocialService {
             PostCommentRepository postCommentRepository,
             PostService postService,
             AuthService authService,
-            NotificationStreamService notificationStreamService
+            NotificationStreamService notificationStreamService,
+            RateLimitService rateLimitService,
+            ContentModerationService contentModerationService,
+            @Value("${app.rate-limit.comments-per-minute:20}") int commentsPerMinute,
+            @Value("${app.rate-limit.follows-per-minute:25}") int followsPerMinute
     ) {
         this.appUserRepository = appUserRepository;
         this.followRepository = followRepository;
@@ -43,12 +51,15 @@ public class SocialService {
         this.postCommentRepository = postCommentRepository;
         this.postService = postService;
         this.authService = authService;
-                this.notificationStreamService = notificationStreamService;
+        this.notificationStreamService = notificationStreamService;
+        this.rateLimitService = rateLimitService;
+        this.contentModerationService = contentModerationService;
+        this.commentsPerMinute = commentsPerMinute;
+        this.followsPerMinute = followsPerMinute;
     }
 
     public List<PostDtos.UserProfileResponse> suggestedUsers(UserPrincipal principal) {
-        List<AppUser> users = appUserRepository.findAll();
-        return users.stream()
+        return appUserRepository.findAll().stream()
                 .filter(user -> !user.getId().equals(principal.id()))
                 .sorted(Comparator.comparing(AppUser::getCreatedAt).reversed())
                 .limit(8)
@@ -57,8 +68,10 @@ public class SocialService {
     }
 
     public PostDtos.UserProfileResponse follow(UserPrincipal principal, Long targetId) {
-                Long safeTargetId = Objects.requireNonNull(targetId, "Target user id is required");
-                if (principal.id().equals(safeTargetId)) {
+        rateLimitService.assertAllowed("follow", principal.id(), followsPerMinute, Duration.ofMinutes(1));
+
+        Long safeTargetId = Objects.requireNonNull(targetId, "Target user id is required");
+        if (principal.id().equals(safeTargetId)) {
             throw new IllegalArgumentException("You cannot follow yourself");
         }
 
@@ -96,58 +109,58 @@ public class SocialService {
                 .map(follow -> follow.getFollowing().getId())
                 .toList();
 
-        List<Post> posts = postRepository.findAll().stream()
-                .filter(post -> post.getAuthorUserId() != null
-                        && (post.getAuthorUserId().equals(principal.id()) || followingIds.contains(post.getAuthorUserId())))
+        List<Long> authorIds = new ArrayList<>();
+        authorIds.add(principal.id());
+        authorIds.addAll(followingIds);
+
+        List<Post> posts = postRepository.findByAuthorUserIdIn(authorIds);
+        List<Post> ranked = posts.stream()
                 .sorted(Comparator.comparing(Post::getCreatedAt).reversed())
                 .toList();
-
-        return postService.toResponses(posts, query);
+        return postService.toResponses(ranked, query, principal.id());
     }
 
-        public PostDtos.PagedPostsResponse personalizedFeedPage(UserPrincipal principal, String query, int page, int size) {
-                List<Long> authorIds = new ArrayList<>();
-                authorIds.add(principal.id());
-                authorIds.addAll(followRepository.findByFollowerId(principal.id()).stream()
-                                .map(follow -> follow.getFollowing().getId())
-                                .toList());
+    public PostDtos.PagedPostsResponse personalizedFeedPage(UserPrincipal principal, String query, int page, int size) {
+        List<Long> followingIds = followRepository.findByFollowerId(principal.id()).stream()
+                .map(follow -> follow.getFollowing().getId())
+                .toList();
 
-                Pageable pageable = PageRequest.of(Math.max(page, 0), clampPageSize(size));
-                Page<Post> resultPage = postRepository.findByAuthorUserIdInOrderByCreatedAtDesc(authorIds, pageable);
-                List<PostDtos.PostResponse> filtered = postService.toResponses(resultPage.getContent(), query);
+        List<Long> authorIds = new ArrayList<>();
+        authorIds.add(principal.id());
+        authorIds.addAll(followingIds);
 
-                return new PostDtos.PagedPostsResponse(
-                                filtered,
-                                resultPage.getNumber(),
-                                resultPage.getSize(),
-                                resultPage.getTotalElements(),
-                                resultPage.hasNext()
-                );
-        }
+        List<Post> posts = postRepository.findByAuthorUserIdIn(authorIds);
+        return postService.rankAndPage(posts, query, page, size, principal.id(), followingIds);
+    }
 
     public List<PostDtos.NotificationResponse> notifications(UserPrincipal principal) {
         return notificationRepository.findTop20ByRecipientIdOrderByCreatedAtDesc(principal.id()).stream()
-                                .map(this::toNotificationResponse)
+                .map(this::toNotificationResponse)
                 .toList();
     }
 
-        public long unreadNotificationCount(UserPrincipal principal) {
-                return notificationRepository.countByRecipientIdAndIsReadFalse(principal.id());
-        }
+    public long unreadNotificationCount(UserPrincipal principal) {
+        return notificationRepository.countByRecipientIdAndIsReadFalse(principal.id());
+    }
 
-        public void markNotificationRead(UserPrincipal principal, Long notificationId) {
-                NotificationItem item = notificationRepository.findByIdAndRecipientId(notificationId, principal.id())
-                                .orElseThrow(() -> new IllegalArgumentException("Notification not found"));
-                item.setRead(true);
-                notificationRepository.save(item);
-        }
+    public void markNotificationRead(UserPrincipal principal, Long notificationId) {
+        NotificationItem item = notificationRepository.findByIdAndRecipientId(notificationId, principal.id())
+                .orElseThrow(() -> new IllegalArgumentException("Notification not found"));
+        item.setRead(true);
+        notificationRepository.save(item);
+    }
 
-        public SseEmitter streamNotifications(UserPrincipal principal) {
-                return notificationStreamService.subscribe(principal.id());
-        }
+    public SseEmitter streamNotifications(UserPrincipal principal) {
+        return notificationStreamService.subscribe(principal.id());
+    }
 
     public PostDtos.CommentResponse addComment(UserPrincipal principal, Long postId, PostDtos.CreateCommentRequest request) {
+        rateLimitService.assertAllowed("comment", principal.id(), commentsPerMinute, Duration.ofMinutes(1));
+
         Long safePostId = Objects.requireNonNull(postId, "Post id is required");
+        String content = request.content().trim();
+        contentModerationService.assertAllowed(content);
+
         AppUser me = appUserRepository.findById(principal.id())
                 .orElseThrow(() -> new IllegalArgumentException("Current user not found"));
         Post post = postRepository.findById(safePostId)
@@ -156,16 +169,18 @@ public class SocialService {
         PostComment comment = new PostComment();
         comment.setPost(post);
         comment.setAuthor(me);
-        comment.setContent(request.content().trim());
+        comment.setContent(content);
         comment.setCreatedAt(Instant.now());
         PostComment saved = postCommentRepository.save(comment);
 
         post.setReplyCount(post.getReplyCount() + 1);
-        postRepository.save(post);
+        Post updatedPost = postRepository.save(post);
+        postService.invalidateDashboardCache();
+        postService.publishPostEvent("post_updated", updatedPost, null);
 
-                Long authorUserId = post.getAuthorUserId();
-                if (authorUserId != null && !authorUserId.equals(me.getId())) {
-                        appUserRepository.findById(authorUserId).ifPresent(target ->
+        Long authorUserId = post.getAuthorUserId();
+        if (authorUserId != null && !authorUserId.equals(me.getId())) {
+            appUserRepository.findById(authorUserId).ifPresent(target ->
                     createNotification(target, "comment", me.getDisplayName() + " commented on your post")
             );
         }
@@ -200,24 +215,17 @@ public class SocialService {
         item.setMessage(message);
         item.setRead(false);
         item.setCreatedAt(Instant.now());
-                NotificationItem saved = notificationRepository.save(item);
-                notificationStreamService.publish(target.getId(), toNotificationResponse(saved));
-        }
+        NotificationItem saved = notificationRepository.save(item);
+        notificationStreamService.publish(target.getId(), toNotificationResponse(saved));
+    }
 
-        private int clampPageSize(int size) {
-                if (size < 1) {
-                        return 10;
-                }
-                return Math.min(size, 50);
-        }
-
-        private PostDtos.NotificationResponse toNotificationResponse(NotificationItem item) {
-                return new PostDtos.NotificationResponse(
-                                item.getId(),
-                                item.getType(),
-                                item.getMessage(),
-                                item.isRead(),
-                                item.getCreatedAt()
-                );
+    private PostDtos.NotificationResponse toNotificationResponse(NotificationItem item) {
+        return new PostDtos.NotificationResponse(
+                item.getId(),
+                item.getType(),
+                item.getMessage(),
+                item.isRead(),
+                item.getCreatedAt()
+        );
     }
 }
