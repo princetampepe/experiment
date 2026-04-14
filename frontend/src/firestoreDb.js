@@ -9,6 +9,7 @@ import {
   updateDoc,
 } from "firebase/firestore";
 import { firestoreDb } from "./firebase";
+import { buildHandleCandidate, decodeJwtPayload, normalizeUserId } from "./authIdentity";
 
 const TOKEN_KEY = "pulse_token_v1";
 
@@ -47,20 +48,7 @@ function readToken() {
 }
 
 function decodeTokenPayload(token) {
-  if (!token) {
-    return null;
-  }
-
-  try {
-    const [, payload] = token.split(".");
-    if (!payload) {
-      return null;
-    }
-
-    return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-  } catch {
-    return null;
-  }
+  return decodeJwtPayload(token);
 }
 
 function parseNumericId(value) {
@@ -71,42 +59,10 @@ function parseNumericId(value) {
   return numeric;
 }
 
-function normalizeUserId(value) {
-  if (value == null) {
-    return null;
-  }
-
-  const text = String(value).trim();
-  if (!text) {
-    return null;
-  }
-
-  if (/^-?\d+$/.test(text)) {
-    const numeric = Number(text);
-    if (Number.isSafeInteger(numeric)) {
-      return String(numeric);
-    }
-  }
-
-  return text;
-}
-
 function userIdsEqual(left, right) {
   const normalizedLeft = normalizeUserId(left);
   const normalizedRight = normalizeUserId(right);
   return normalizedLeft != null && normalizedLeft === normalizedRight;
-}
-
-function buildHandleCandidate(input, fallback = "user") {
-  const cleaned = String(input || "")
-    .trim()
-    .toLowerCase()
-    .replace(/^@+/, "")
-    .replace(/[^a-z0-9_]/g, "")
-    .slice(0, 20);
-
-  const base = cleaned || String(fallback || "user").replace(/[^a-z0-9_]/gi, "").toLowerCase().slice(0, 20) || "user";
-  return `@${base}`;
 }
 
 function getCurrentUserId(optional = true) {

@@ -24,7 +24,6 @@ import {
   me,
   register,
   sendMessage,
-  setSession,
   unfollowUser,
   votePoll,
   markMessageThreadRead,
@@ -329,7 +328,7 @@ function App() {
   }, [activeView, isFeedView, reduceMotion, posts]);
 
   const loadSidebarData = useCallback(async () => {
-    const dashboardData = await getDashboard();
+    const dashboardData = await getDashboard().catch(() => null);
     setDashboard(dashboardData);
 
     if (!getToken()) {
@@ -339,15 +338,15 @@ function App() {
       return;
     }
 
-    const [notifData, usersData, unreadData] = await Promise.all([
+    const [notifData, usersData, unreadData] = await Promise.allSettled([
       getNotifications(),
       getSuggestedUsers(),
       getUnreadNotificationCount(),
     ]);
 
-    setNotifications(notifData);
-    setSuggestedUsers(usersData);
-    setUnreadCount(unreadData?.count ?? 0);
+    setNotifications(notifData.status === "fulfilled" ? notifData.value : []);
+    setSuggestedUsers(usersData.status === "fulfilled" ? usersData.value : []);
+    setUnreadCount(unreadData.status === "fulfilled" ? (unreadData.value?.count ?? 0) : 0);
   }, []);
 
   const loadPostsPage = useCallback(
@@ -692,7 +691,6 @@ function App() {
             displayName: authForm.displayName,
           });
 
-      setSession(response.token, response.refreshToken);
       setCurrentUser(response.user);
       setShowPersonalized(false);
       triggerToast(authMode === "login" ? "Signed in" : "Account created");

@@ -31,6 +31,7 @@ import {
   updateProfile,
 } from "firebase/auth";
 import { firebaseAuth } from "./firebase";
+import { buildHandleCandidate, decodeJwtPayload } from "./authIdentity";
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api").replace(/\/$/, "");
 const STORAGE_KEY = "pulse_offline_posts_v1";
@@ -65,21 +66,6 @@ const fallbackGaps = [
     suggestedImplementation: "Implement report queues and moderation status flow.",
   },
 ];
-
-function buildHandleCandidate(input, fallback = "user") {
-  const cleaned = String(input || "")
-    .trim()
-    .toLowerCase()
-    .replace(/^@+/, "")
-    .replace(/[^a-z0-9_]/g, "")
-    .slice(0, 20);
-  const fallbackClean = String(fallback || "user")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9_]/g, "")
-    .slice(0, 20);
-  return `@${cleaned || fallbackClean || "user"}`;
-}
 
 function mapFirebaseUserProfile(authUser, profileOverrides = {}) {
   const uid = String(authUser?.uid || "").trim();
@@ -472,21 +458,12 @@ function getOfflineActorKey() {
     return "guest";
   }
 
-  try {
-    const [, payload] = token.split(".");
-    if (!payload) {
-      return `token:${token.slice(-12)}`;
-    }
-
-    const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-    const actorId = decoded?.sub || decoded?.uid || decoded?.user_id;
-    if (actorId) {
-      return `user:${actorId}`;
-    }
-    return `token:${token.slice(-12)}`;
-  } catch {
-    return `token:${token.slice(-12)}`;
+  const decoded = decodeJwtPayload(token);
+  const actorId = decoded?.sub || decoded?.uid || decoded?.user_id;
+  if (actorId) {
+    return `user:${actorId}`;
   }
+  return `token:${token.slice(-12)}`;
 }
 
 function filterPosts(posts, query) {
