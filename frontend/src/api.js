@@ -1,3 +1,29 @@
+import {
+  addCommentInFirestore,
+  createFeedStreamFromFirestore,
+  createNotificationStreamFromFirestore,
+  createPostInFirestore,
+  editPostInFirestore,
+  engageInFirestore,
+  followUserInFirestore,
+  getCommentsFromFirestore,
+  getDashboardFromFirestore,
+  getMessageInboxFromFirestore,
+  getMessageThreadFromFirestore,
+  getNotificationsFromFirestore,
+  getPersonalizedFeedFromFirestore,
+  getPostInsightsFromFirestore,
+  getPostsFromFirestore,
+  getSuggestedUsersFromFirestore,
+  getUnreadNotificationCountFromFirestore,
+  markMessageThreadReadInFirestore,
+  markNotificationReadInFirestore,
+  sendMessageInFirestore,
+  syncAuthUserToFirestore,
+  unfollowUserInFirestore,
+  votePollInFirestore,
+} from "./firestoreDb";
+
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api").replace(/\/$/, "");
 const STORAGE_KEY = "pulse_offline_posts_v1";
 const TOKEN_KEY = "pulse_token_v1";
@@ -393,229 +419,255 @@ function buildFeedPath(basePath, { query = "", page = 0, size = 10 } = {}) {
 }
 
 export function getPosts(params = {}) {
-  return request(buildFeedPath("/posts", params)).catch(() => {
-    const { query = "", page = 0, size = 10 } = params;
-    const posts = filterPosts(readOfflinePosts(), query).sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-    const start = page * size;
-    const items = posts.slice(start, start + size);
-    return {
-      items,
-      page,
-      size,
-      totalElements: posts.length,
-      hasNext: start + size < posts.length,
-    };
-  });
+  return getPostsFromFirestore(params).catch(() => (
+    request(buildFeedPath("/posts", params)).catch(() => {
+      const { query = "", page = 0, size = 10 } = params;
+      const posts = filterPosts(readOfflinePosts(), query).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
+      const start = page * size;
+      const items = posts.slice(start, start + size);
+      return {
+        items,
+        page,
+        size,
+        totalElements: posts.length,
+        hasNext: start + size < posts.length,
+      };
+    })
+  ));
 }
 
 export function getPersonalizedFeed(params = {}) {
-  return request(buildFeedPath("/feed/personalized", params));
+  return getPersonalizedFeedFromFirestore(params).catch(() => request(buildFeedPath("/feed/personalized", params)));
 }
 
 export function createPost(payload) {
-  return request("/posts", {
-    method: "POST",
-    body: JSON.stringify({
-      content: payload.content,
-      tags: payload.tags,
-      mediaUrls: payload.mediaUrls,
-      pollOptions: payload.pollOptions,
-      parentPostId: payload.parentPostId,
-    }),
-  }).catch(() => {
-    const posts = readOfflinePosts();
-    const id = Date.now();
-    const mediaUrls = Array.isArray(payload.mediaUrls) ? payload.mediaUrls.slice(0, 4) : [];
-    const poll = buildOfflinePoll(Array.isArray(payload.pollOptions) ? payload.pollOptions : []);
-    const next = {
-      id,
-      author: payload.author || "You",
-      handle: payload.handle || "@you",
-      content: payload.content || "",
-      tags: Array.isArray(payload.tags) && payload.tags.length ? payload.tags : ["#update"],
-      mediaUrls,
-      poll,
-      parentPostId: payload.parentPostId ?? null,
-      replyCount: 0,
-      repostCount: 0,
-      likeCount: 0,
-      bookmarkCount: 0,
-      commentCount: 0,
-      createdAt: new Date().toISOString(),
-      editedAt: null,
-      viewCount: 0,
-    };
-    const merged = [ensureOfflinePostShape(next), ...posts];
-    writeOfflinePosts(merged);
-    return merged[0];
-  });
+  return createPostInFirestore(payload).catch(() => (
+    request("/posts", {
+      method: "POST",
+      body: JSON.stringify({
+        content: payload.content,
+        tags: payload.tags,
+        mediaUrls: payload.mediaUrls,
+        pollOptions: payload.pollOptions,
+        parentPostId: payload.parentPostId,
+      }),
+    }).catch(() => {
+      const posts = readOfflinePosts();
+      const id = Date.now();
+      const mediaUrls = Array.isArray(payload.mediaUrls) ? payload.mediaUrls.slice(0, 4) : [];
+      const poll = buildOfflinePoll(Array.isArray(payload.pollOptions) ? payload.pollOptions : []);
+      const next = {
+        id,
+        author: payload.author || "You",
+        handle: payload.handle || "@you",
+        content: payload.content || "",
+        tags: Array.isArray(payload.tags) && payload.tags.length ? payload.tags : ["#update"],
+        mediaUrls,
+        poll,
+        parentPostId: payload.parentPostId ?? null,
+        replyCount: 0,
+        repostCount: 0,
+        likeCount: 0,
+        bookmarkCount: 0,
+        commentCount: 0,
+        createdAt: new Date().toISOString(),
+        editedAt: null,
+        viewCount: 0,
+      };
+      const merged = [ensureOfflinePostShape(next), ...posts];
+      writeOfflinePosts(merged);
+      return merged[0];
+    })
+  ));
 }
 
 export function editPost(postId, content) {
-  return request(`/posts/${postId}`, {
-    method: "PATCH",
-    body: JSON.stringify({ content }),
-  }).catch(() => {
-    const posts = readOfflinePosts();
-    const updated = posts.map((post) => {
-      if (post.id !== postId) {
-        return post;
-      }
+  return editPostInFirestore(postId, content).catch(() => (
+    request(`/posts/${postId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content }),
+    }).catch(() => {
+      const posts = readOfflinePosts();
+      const updated = posts.map((post) => {
+        if (post.id !== postId) {
+          return post;
+        }
 
-      const editedPost = ensureOfflinePostShape({
-        ...post,
-        content,
-        editedAt: new Date().toISOString(),
-      });
-      return {
-        ...editedPost,
-        insights: calculateOfflineInsights(editedPost),
-      };
-    });
-
-    writeOfflinePosts(updated);
-    return updated.find((post) => post.id === postId);
-  });
-}
-
-export function votePoll(postId, option) {
-  return request(`/posts/${postId}/poll/vote`, {
-    method: "POST",
-    body: JSON.stringify({ option }),
-  }).catch(() => {
-    const posts = readOfflinePosts();
-    const updated = posts.map((post) => {
-      if (post.id !== postId || !post.poll) {
-        return post;
-      }
-
-      const totalVotes = Number(post.poll.totalVotes || 0) + 1;
-      const options = post.poll.options.map((pollOption) => {
-        const votes = pollOption.label === option ? Number(pollOption.votes || 0) + 1 : Number(pollOption.votes || 0);
+        const editedPost = ensureOfflinePostShape({
+          ...post,
+          content,
+          editedAt: new Date().toISOString(),
+        });
         return {
-          ...pollOption,
-          votes,
-          percentage: totalVotes === 0 ? 0 : Number(((votes * 100) / totalVotes).toFixed(1)),
+          ...editedPost,
+          insights: calculateOfflineInsights(editedPost),
         };
       });
 
-      const nextPost = ensureOfflinePostShape({
-        ...post,
-        poll: {
-          options,
-          totalVotes,
-          hasVoted: true,
-        },
+      writeOfflinePosts(updated);
+      return updated.find((post) => post.id === postId);
+    })
+  ));
+}
+
+export function votePoll(postId, option) {
+  return votePollInFirestore(postId, option).catch(() => (
+    request(`/posts/${postId}/poll/vote`, {
+      method: "POST",
+      body: JSON.stringify({ option }),
+    }).catch(() => {
+      const posts = readOfflinePosts();
+      const updated = posts.map((post) => {
+        if (post.id !== postId || !post.poll) {
+          return post;
+        }
+
+        const totalVotes = Number(post.poll.totalVotes || 0) + 1;
+        const options = post.poll.options.map((pollOption) => {
+          const votes = pollOption.label === option ? Number(pollOption.votes || 0) + 1 : Number(pollOption.votes || 0);
+          return {
+            ...pollOption,
+            votes,
+            percentage: totalVotes === 0 ? 0 : Number(((votes * 100) / totalVotes).toFixed(1)),
+          };
+        });
+
+        const nextPost = ensureOfflinePostShape({
+          ...post,
+          poll: {
+            options,
+            totalVotes,
+            hasVoted: true,
+          },
+        });
+
+        return {
+          ...nextPost,
+          insights: calculateOfflineInsights(nextPost),
+        };
       });
 
-      return {
-        ...nextPost,
-        insights: calculateOfflineInsights(nextPost),
-      };
-    });
-
-    writeOfflinePosts(updated);
-    return updated.find((post) => post.id === postId);
-  });
+      writeOfflinePosts(updated);
+      return updated.find((post) => post.id === postId);
+    })
+  ));
 }
 
 export function getPostInsights(postId) {
-  return request(`/posts/${postId}/insights`).catch(() => {
-    const post = readOfflinePosts().find((item) => item.id === postId);
-    if (!post) {
-      return { views: 0, engagementTotal: 0, engagementRate: 0 };
-    }
-    return calculateOfflineInsights(post);
-  });
+  return getPostInsightsFromFirestore(postId).catch(() => (
+    request(`/posts/${postId}/insights`).catch(() => {
+      const post = readOfflinePosts().find((item) => item.id === postId);
+      if (!post) {
+        return { views: 0, engagementTotal: 0, engagementRate: 0 };
+      }
+      return calculateOfflineInsights(post);
+    })
+  ));
 }
 
 export function engage(postId, action) {
-  return request(`/posts/${postId}/engage`, {
-    method: "POST",
-    body: JSON.stringify({ action }),
-  }).catch(() => {
-    const posts = readOfflinePosts();
-    const offlineEngagement = readOfflineEngagement();
-    const actorKey = getOfflineActorKey();
-    const postKey = String(postId);
-    const actorState = offlineEngagement[actorKey] || {};
-    const postState = actorState[postKey] || { like: false, repost: false };
-    let nextPostState = postState;
+  return engageInFirestore(postId, action).catch(() => (
+    request(`/posts/${postId}/engage`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    }).catch(() => {
+      const posts = readOfflinePosts();
+      const offlineEngagement = readOfflineEngagement();
+      const actorKey = getOfflineActorKey();
+      const postKey = String(postId);
+      const actorState = offlineEngagement[actorKey] || {};
+      const postState = actorState[postKey] || { like: false, repost: false };
+      let nextPostState = postState;
 
-    const updated = posts.map((post) => {
-      if (post.id !== postId) {
-        return post;
-      }
-
-      let changedPost = post;
-
-      if (action === "reply") {
-        changedPost = { ...post, replyCount: post.replyCount + 1 };
-      }
-      if (action === "repost") {
-        if (postState.repost) {
+      const updated = posts.map((post) => {
+        if (post.id !== postId) {
           return post;
         }
-        nextPostState = { ...nextPostState, repost: true };
-        changedPost = { ...post, repostCount: post.repostCount + 1 };
-      }
-      if (action === "like") {
-        if (postState.like) {
-          return post;
+
+        let changedPost = post;
+
+        if (action === "reply") {
+          changedPost = { ...post, replyCount: post.replyCount + 1 };
         }
-        nextPostState = { ...nextPostState, like: true };
-        changedPost = { ...post, likeCount: post.likeCount + 1 };
-      }
-      if (action === "bookmark") {
-        changedPost = { ...post, bookmarkCount: post.bookmarkCount + 1 };
-      }
+        if (action === "repost") {
+          if (postState.repost) {
+            return post;
+          }
+          nextPostState = { ...nextPostState, repost: true };
+          changedPost = { ...post, repostCount: post.repostCount + 1 };
+        }
+        if (action === "like") {
+          if (postState.like) {
+            return post;
+          }
+          nextPostState = { ...nextPostState, like: true };
+          changedPost = { ...post, likeCount: post.likeCount + 1 };
+        }
+        if (action === "bookmark") {
+          changedPost = { ...post, bookmarkCount: post.bookmarkCount + 1 };
+        }
 
-      const shaped = ensureOfflinePostShape(changedPost);
-      return {
-        ...shaped,
-        insights: calculateOfflineInsights(shaped),
-      };
-    });
-
-    writeOfflinePosts(updated);
-    if (action === "like" || action === "repost") {
-      writeOfflineEngagement({
-        ...offlineEngagement,
-        [actorKey]: {
-          ...actorState,
-          [postKey]: nextPostState,
-        },
+        const shaped = ensureOfflinePostShape(changedPost);
+        return {
+          ...shaped,
+          insights: calculateOfflineInsights(shaped),
+        };
       });
-    }
-    return updated.find((post) => post.id === postId);
-  });
+
+      writeOfflinePosts(updated);
+      if (action === "like" || action === "repost") {
+        writeOfflineEngagement({
+          ...offlineEngagement,
+          [actorKey]: {
+            ...actorState,
+            [postKey]: nextPostState,
+          },
+        });
+      }
+      return updated.find((post) => post.id === postId);
+    })
+  ));
 }
 
 export function getDashboard() {
-  return request("/dashboard").catch(() => {
-    const posts = readOfflinePosts();
-    return buildDashboardFromPosts(posts);
-  });
+  return getDashboardFromFirestore().catch(() => (
+    request("/dashboard").catch(() => {
+      const posts = readOfflinePosts();
+      return buildDashboardFromPosts(posts);
+    })
+  ));
 }
 
-export function register(payload) {
-  return request("/auth/register", {
+export async function register(payload) {
+  const response = await request("/auth/register", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  await syncAuthUserToFirestore(response?.user).catch(() => {
+    // Keep auth flow working even if Firestore sync fails.
+  });
+  return response;
 }
 
-export function login(payload) {
-  return request("/auth/login", {
+export async function login(payload) {
+  const response = await request("/auth/login", {
     method: "POST",
     body: JSON.stringify(payload),
   });
+  await syncAuthUserToFirestore(response?.user).catch(() => {
+    // Keep auth flow working even if Firestore sync fails.
+  });
+  return response;
 }
 
-export function me() {
-  return request("/auth/me");
+export async function me() {
+  const response = await request("/auth/me");
+  await syncAuthUserToFirestore(response).catch(() => {
+    // Keep profile flow working even if Firestore sync fails.
+  });
+  return response;
 }
 
 export function logout() {
@@ -623,36 +675,76 @@ export function logout() {
 }
 
 export function getSuggestedUsers() {
-  return request("/users/suggested");
+  return getSuggestedUsersFromFirestore().catch(() => request("/users/suggested"));
 }
 
 export function followUser(userId) {
-  return request(`/users/${userId}/follow`, {
-    method: "POST",
-  });
+  return followUserInFirestore(userId).catch(() => (
+    request(`/users/${userId}/follow`, {
+      method: "POST",
+    })
+  ));
 }
 
 export function unfollowUser(userId) {
-  return request(`/users/${userId}/follow`, {
-    method: "DELETE",
-  });
+  return unfollowUserInFirestore(userId).catch(() => (
+    request(`/users/${userId}/follow`, {
+      method: "DELETE",
+    })
+  ));
 }
 
 export function getNotifications() {
-  return request("/notifications");
+  return getNotificationsFromFirestore().catch(() => request("/notifications"));
+}
+
+export function getMessageInbox() {
+  return getMessageInboxFromFirestore().catch(() => request("/messages/inbox").catch(() => []));
+}
+
+export function getMessageThread(peerId) {
+  return getMessageThreadFromFirestore(peerId).catch(() => request(`/messages/thread/${peerId}`).catch(() => []));
+}
+
+export function sendMessage(recipientId, content) {
+  return sendMessageInFirestore(recipientId, content).catch(() => (
+    request("/messages", {
+      method: "POST",
+      body: JSON.stringify({ recipientId, content }),
+    })
+  ));
+}
+
+export function markMessageThreadRead(peerId) {
+  return markMessageThreadReadInFirestore(peerId).catch(() => (
+    request(`/messages/thread/${peerId}/read`, {
+      method: "PATCH",
+    }).catch(() => ({ status: "ok" }))
+  ));
 }
 
 export function getUnreadNotificationCount() {
-  return request("/notifications/unread-count");
+  return getUnreadNotificationCountFromFirestore().catch(() => request("/notifications/unread-count"));
 }
 
 export function markNotificationRead(notificationId) {
-  return request(`/notifications/${notificationId}/read`, {
-    method: "PATCH",
-  });
+  return markNotificationReadInFirestore(notificationId).catch(() => (
+    request(`/notifications/${notificationId}/read`, {
+      method: "PATCH",
+    })
+  ));
 }
 
 export function createNotificationStream(onNotification, onError) {
+  try {
+    const firestoreStream = createNotificationStreamFromFirestore(onNotification, onError);
+    if (firestoreStream) {
+      return firestoreStream;
+    }
+  } catch {
+    // Fall through to backend SSE stream.
+  }
+
   const token = getToken();
   if (!token) {
     return null;
@@ -680,6 +772,15 @@ export function createNotificationStream(onNotification, onError) {
 }
 
 export function createFeedStream(onFeedEvent, onError) {
+  try {
+    const firestoreStream = createFeedStreamFromFirestore(onFeedEvent, onError);
+    if (firestoreStream) {
+      return firestoreStream;
+    }
+  } catch {
+    // Fall through to backend SSE stream.
+  }
+
   const token = getToken();
   const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : "";
   const source = new EventSource(`${BASE_URL}/feed/stream${tokenQuery}`);
@@ -703,12 +804,14 @@ export function createFeedStream(onFeedEvent, onError) {
 }
 
 export function getComments(postId) {
-  return request(`/posts/${postId}/comments`);
+  return getCommentsFromFirestore(postId).catch(() => request(`/posts/${postId}/comments`));
 }
 
 export function addComment(postId, content) {
-  return request(`/posts/${postId}/comments`, {
-    method: "POST",
-    body: JSON.stringify({ content }),
-  });
+  return addCommentInFirestore(postId, content).catch(() => (
+    request(`/posts/${postId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({ content }),
+    })
+  ));
 }

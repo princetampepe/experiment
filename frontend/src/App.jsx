@@ -10,6 +10,8 @@ import {
   followUser,
   getComments,
   getDashboard,
+  getMessageInbox,
+  getMessageThread,
   getNotifications,
   getPersonalizedFeed,
   getPosts,
@@ -21,9 +23,11 @@ import {
   markNotificationRead,
   me,
   register,
+  sendMessage,
   setSession,
   unfollowUser,
   votePoll,
+  markMessageThreadRead,
 } from "./api";
 
 const PAGE_SIZE = 10;
@@ -80,6 +84,12 @@ function App() {
   const [showPersonalized, setShowPersonalized] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
+  const [messageInbox, setMessageInbox] = useState([]);
+  const [activeMessagePeerId, setActiveMessagePeerId] = useState(null);
+  const [messageThread, setMessageThread] = useState([]);
+  const [messageDraft, setMessageDraft] = useState("");
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [sendingMessage, setSendingMessage] = useState(false);
   const [suggestedUsers, setSuggestedUsers] = useState([]);
   const [commentsByPost, setCommentsByPost] = useState({});
   const [commentDraft, setCommentDraft] = useState({});
@@ -366,6 +376,56 @@ function App() {
     [showPersonalized, currentUser, debouncedQuery]
   );
 
+  const loadMessageThreadData = useCallback(async (peerId) => {
+    if (!currentUser || !peerId) {
+      setMessageThread([]);
+      return;
+    }
+
+    try {
+      const threadData = await getMessageThread(peerId);
+      setMessageThread(threadData);
+      await markMessageThreadRead(peerId);
+      setMessageInbox((prev) => prev.map((item) => (
+        item.peerId === peerId ? { ...item, unreadCount: 0 } : item
+      )));
+    } catch (err) {
+      setError(err.message || "Could not load conversation");
+    }
+  }, [currentUser]);
+
+  const loadMessageInboxData = useCallback(async (preferredPeerId = null) => {
+    if (!currentUser) {
+      setMessageInbox([]);
+      setActiveMessagePeerId(null);
+      setMessageThread([]);
+      return;
+    }
+
+    try {
+      setLoadingMessages(true);
+      const inboxData = await getMessageInbox();
+      setMessageInbox(inboxData);
+
+      const requestedPeer = preferredPeerId ?? activeMessagePeerId;
+      const selectedPeer = inboxData.find((item) => item.peerId === requestedPeer)?.peerId
+        || inboxData[0]?.peerId
+        || null;
+
+      setActiveMessagePeerId(selectedPeer);
+
+      if (selectedPeer) {
+        await loadMessageThreadData(selectedPeer);
+      } else {
+        setMessageThread([]);
+      }
+    } catch (err) {
+      setError(err.message || "Could not load message inbox");
+    } finally {
+      setLoadingMessages(false);
+    }
+  }, [currentUser, activeMessagePeerId, loadMessageThreadData]);
+
   const mergeIncomingPost = useCallback((incomingPost, eventType) => {
     if (!incomingPost || !incomingPost.id) {
       return;
@@ -418,6 +478,21 @@ function App() {
   useEffect(() => {
     loadPostsPage(0, false);
   }, [loadPostsPage]);
+
+  useEffect(() => {
+    if (activeView !== "Messages") {
+      return;
+    }
+
+    if (!currentUser) {
+      setMessageInbox([]);
+      setActiveMessagePeerId(null);
+      setMessageThread([]);
+      return;
+    }
+
+    loadMessageInboxData();
+  }, [activeView, currentUser, loadMessageInboxData]);
 
   useEffect(() => {
     if (!isFeedView || !feedHasNext || loading || loadingMore) {
@@ -675,6 +750,35 @@ function App() {
     }
   }
 
+  async function onSelectConversation(peerId) {
+    setActiveMessagePeerId(peerId);
+    await loadMessageThreadData(peerId);
+  }
+
+  async function onSendMessage() {
+    if (!currentUser || !activeMessagePeerId) {
+      return;
+    }
+
+    const text = messageDraft.trim();
+    if (!text) {
+      return;
+    }
+
+    try {
+      setSendingMessage(true);
+      setError("");
+      await sendMessage(activeMessagePeerId, text);
+      setMessageDraft("");
+      triggerToast("Message sent");
+      await loadMessageInboxData(activeMessagePeerId);
+    } catch (err) {
+      setError(err.message || "Failed to send message");
+    } finally {
+      setSendingMessage(false);
+    }
+  }
+
   async function onMarkNotificationRead(notificationId) {
     try {
       await markNotificationRead(notificationId);
@@ -731,6 +835,10 @@ function App() {
 
     return nextPosts;
   }, [activeView, posts, mutedWords]);
+
+  const activeConversation = useMemo(() => (
+    messageInbox.find((item) => item.peerId === activeMessagePeerId) || null
+  ), [messageInbox, activeMessagePeerId]);
 
   const canCompose = activeView === "Home" || activeView === "Explore";
   const shouldShowRightCol = isFeedView && (!isMobileViewport || showMobileInsights);
@@ -1138,9 +1246,99 @@ function App() {
           ) : null}
 
           {activeView === "Messages" ? (
-            <section className="glass card">
+            <section className="glass card messages-shell">
               <h3>Messages</h3>
-              <p className="notice">Dedicated messaging inbox will be connected in a backend step.</p>
+              {!currentUser ? (
+                <p className="notice">Sign in to use your inbox and direct messages.</p>
+              ) : (
+                <div className="messages-grid">
+                  <aside className="messages-inbox">
+                    <div className="messages-inbox-head">
+                      <strong>Inbox</strong>
+                      <small>{messageInbox.length} conversations</small>
+                    </div>
+                    {loadingMessages ? <p className="notice">Loading conversations...</p> : null}
+                    {!loadingMessages && messageInbox.length === 0 ? (
+                      <p className="notice">No conversations yet. Follow someone and send your first message.</p>
+                    ) : null}
+
+                    <ul className="messages-list">
+                      {messageInbox.map((conversation) => (
+                        <li key={conversation.peerId}>
+                          <button
+                            type="button"
+                            className={`message-peer-btn ${activeMessagePeerId === conversation.peerId ? "active" : ""}`}
+                            onClick={() => onSelectConversation(conversation.peerId)}
+                          >
+                            <span className="peer-line">
+                              <strong>{conversation.peerDisplayName}</strong>
+                              <small>{conversation.peerHandle}</small>
+                            </span>
+                            <p>{conversation.lastMessage}</p>
+                            <span className="peer-meta">
+                              <small>
+                                {conversation.lastMessageAt
+                                  ? new Date(conversation.lastMessageAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+                                  : ""}
+                              </small>
+                              {conversation.unreadCount > 0 ? (
+                                <span className="notif-pill">{conversation.unreadCount}</span>
+                              ) : null}
+                            </span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </aside>
+
+                  <section className="messages-thread">
+                    {activeConversation ? (
+                      <>
+                        <header className="messages-thread-head">
+                          <h4>{activeConversation.peerDisplayName}</h4>
+                          <small>{activeConversation.peerHandle}</small>
+                        </header>
+
+                        <div className="messages-bubbles">
+                          {messageThread.map((message) => (
+                            <article
+                              key={message.id}
+                              className={`message-bubble ${message.mine ? "mine" : "theirs"}`}
+                            >
+                              <p>{message.content}</p>
+                              <small>
+                                {new Date(message.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                              </small>
+                            </article>
+                          ))}
+                          {messageThread.length === 0 ? (
+                            <p className="notice">No messages yet. Send the first one.</p>
+                          ) : null}
+                        </div>
+
+                        <div className="messages-compose">
+                          <input
+                            placeholder={`Message ${activeConversation.peerDisplayName}`}
+                            value={messageDraft}
+                            onChange={(event) => setMessageDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                onSendMessage();
+                              }
+                            }}
+                          />
+                          <button type="button" className="hero-btn" onClick={onSendMessage} disabled={sendingMessage}>
+                            {sendingMessage ? "Sending..." : "Send"}
+                          </button>
+                        </div>
+                      </>
+                    ) : (
+                      <p className="notice">Select a conversation from your inbox to start messaging.</p>
+                    )}
+                  </section>
+                </div>
+              )}
             </section>
           ) : null}
 

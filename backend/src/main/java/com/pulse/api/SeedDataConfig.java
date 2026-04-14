@@ -17,6 +17,7 @@ public class SeedDataConfig {
             PostRepository repository,
             AppUserRepository appUserRepository,
             FollowRepository followRepository,
+            DirectMessageRepository directMessageRepository,
             PasswordEncoder passwordEncoder
     ) {
         return args -> {
@@ -60,6 +61,30 @@ public class SeedDataConfig {
                     2, 5, 20, 4,
                     Instant.now().minus(1, ChronoUnit.HOURS)
             ));
+
+                directMessageRepository.save(buildMessage(
+                    avery,
+                    maya,
+                    "Can you review the metrics card hierarchy before launch?",
+                    Instant.now().minus(45, ChronoUnit.MINUTES),
+                    null
+                ));
+
+                directMessageRepository.save(buildMessage(
+                    maya,
+                    avery,
+                    "Yes. I pushed contrast updates and cleaner spacing.",
+                    Instant.now().minus(30, ChronoUnit.MINUTES),
+                    Instant.now().minus(25, ChronoUnit.MINUTES)
+                ));
+
+                directMessageRepository.save(buildMessage(
+                    noah,
+                    avery,
+                    "The new live feed pulse animation looks great on mobile.",
+                    Instant.now().minus(10, ChronoUnit.MINUTES),
+                    null
+                ));
         };
     }
 
@@ -119,5 +144,21 @@ public class SeedDataConfig {
         post.setEditedAt(null);
         post.setViewCount(0);
         return post;
+    }
+
+    private @NonNull DirectMessage buildMessage(
+            AppUser sender,
+            AppUser recipient,
+            String content,
+            Instant createdAt,
+            Instant readAt
+    ) {
+        DirectMessage message = new DirectMessage();
+        message.setSender(sender);
+        message.setRecipient(recipient);
+        message.setContent(content);
+        message.setCreatedAt(createdAt);
+        message.setReadAt(readAt);
+        return message;
     }
 }

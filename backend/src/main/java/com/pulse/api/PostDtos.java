@@ -153,6 +153,36 @@ public final class PostDtos {
     ) {
     }
 
+    public record SendMessageRequest(
+            Long recipientId,
+            @NotBlank @Size(max = 500) String content
+    ) {
+    }
+
+    public record ConversationSummaryResponse(
+            Long peerId,
+            String peerHandle,
+            String peerDisplayName,
+            String peerBio,
+            String lastMessage,
+            Instant lastMessageAt,
+            long unreadCount
+    ) {
+    }
+
+    public record MessageResponse(
+            Long id,
+            Long senderId,
+            String senderDisplayName,
+            Long recipientId,
+            String recipientDisplayName,
+            String content,
+            Instant createdAt,
+            Instant readAt,
+            boolean mine
+    ) {
+    }
+
     public record DashboardResponse(
             long totalPosts,
             long totalEngagement,
