@@ -23,6 +23,14 @@ import {
   unfollowUserInFirestore,
   votePollInFirestore,
 } from "./firestoreDb";
+import {
+  createUserWithEmailAndPassword,
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  signOut,
+  updateProfile,
+} from "firebase/auth";
+import { firebaseAuth } from "./firebase";
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api").replace(/\/$/, "");
 const STORAGE_KEY = "pulse_offline_posts_v1";
@@ -57,6 +65,114 @@ const fallbackGaps = [
     suggestedImplementation: "Implement report queues and moderation status flow.",
   },
 ];
+
+function buildHandleCandidate(input, fallback = "user") {
+  const cleaned = String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, "")
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 20);
+  const fallbackClean = String(fallback || "user")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 20);
+  return `@${cleaned || fallbackClean || "user"}`;
+}
+
+function mapFirebaseUserProfile(authUser, profileOverrides = {}) {
+  const uid = String(authUser?.uid || "").trim();
+  const email = String(profileOverrides.email || authUser?.email || "").trim();
+  const displayName = String(profileOverrides.displayName || authUser?.displayName || "").trim();
+  const handle = buildHandleCandidate(
+    profileOverrides.handle || displayName || email || uid,
+    uid || "user"
+  );
+
+  return {
+    id: uid,
+    authUid: uid,
+    email,
+    handle,
+    displayName: displayName || handle.replace(/^@/, "") || "Pulse User",
+    bio: String(profileOverrides.bio || "").trim() || "Building in public on Pulse.",
+  };
+}
+
+function normalizeFirebaseAuthError(error, fallbackMessage) {
+  const code = String(error?.code || "");
+
+  if (code === "auth/email-already-in-use") {
+    return "Email is already registered";
+  }
+  if (code === "auth/invalid-credential") {
+    return "Invalid email or password";
+  }
+  if (code === "auth/user-disabled") {
+    return "This account is disabled";
+  }
+  if (code === "auth/too-many-requests") {
+    return "Too many attempts. Please try again in a moment";
+  }
+  if (code === "auth/network-request-failed") {
+    return "Network error while contacting Firebase Auth";
+  }
+
+  return error?.message || fallbackMessage;
+}
+
+async function waitForFirebaseAuthUser() {
+  if (firebaseAuth.currentUser) {
+    return firebaseAuth.currentUser;
+  }
+
+  if (typeof window === "undefined") {
+    return firebaseAuth.currentUser;
+  }
+
+  return new Promise((resolve) => {
+    let resolved = false;
+    let unsubscribe = () => {};
+
+    const finish = (user) => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      window.clearTimeout(timeoutId);
+      unsubscribe();
+      resolve(user || null);
+    };
+
+    const timeoutId = window.setTimeout(() => {
+      finish(firebaseAuth.currentUser);
+    }, 1400);
+
+    unsubscribe = onAuthStateChanged(
+      firebaseAuth,
+      (user) => {
+        finish(user);
+      },
+      () => {
+        finish(firebaseAuth.currentUser);
+      }
+    );
+  });
+}
+
+async function buildFirebaseSessionResponse(authUser, profileOverrides = {}, forceRefresh = false) {
+  const token = await authUser.getIdToken(forceRefresh);
+  const refreshToken = authUser.refreshToken || "";
+  const profileSeed = mapFirebaseUserProfile(authUser, profileOverrides);
+  const syncedProfile = await syncAuthUserToFirestore(profileSeed).catch(() => profileSeed);
+
+  return {
+    token,
+    refreshToken,
+    user: syncedProfile || profileSeed,
+  };
+}
 
 async function parseResponse(response) {
   const contentType = response.headers.get("content-type") || "";
@@ -106,6 +222,18 @@ function shouldRefresh(path) {
 }
 
 async function refreshSession() {
+  const authUser = firebaseAuth.currentUser;
+  if (authUser) {
+    try {
+      const token = await authUser.getIdToken(true);
+      const refreshToken = authUser.refreshToken || getRefreshToken();
+      setSession(token, refreshToken || "");
+      return true;
+    } catch {
+      // Fall through to legacy backend refresh token flow.
+    }
+  }
+
   const refreshToken = getRefreshToken();
   if (!refreshToken) {
     clearSession();
@@ -351,8 +479,9 @@ function getOfflineActorKey() {
     }
 
     const decoded = JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/")));
-    if (decoded?.sub) {
-      return `user:${decoded.sub}`;
+    const actorId = decoded?.sub || decoded?.uid || decoded?.user_id;
+    if (actorId) {
+      return `user:${actorId}`;
     }
     return `token:${token.slice(-12)}`;
   } catch {
@@ -641,37 +770,69 @@ export function getDashboard() {
 }
 
 export async function register(payload) {
-  const response = await request("/auth/register", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  await syncAuthUserToFirestore(response?.user).catch(() => {
-    // Keep auth flow working even if Firestore sync fails.
-  });
-  return response;
+  try {
+    const credential = await createUserWithEmailAndPassword(
+      firebaseAuth,
+      String(payload?.email || "").trim(),
+      String(payload?.password || "")
+    );
+
+    const requestedDisplayName = String(payload?.displayName || "").trim();
+    if (requestedDisplayName) {
+      await updateProfile(credential.user, { displayName: requestedDisplayName }).catch(() => {
+        // Profile update can fail in strict browser contexts; auth still succeeds.
+      });
+    }
+
+    const response = await buildFirebaseSessionResponse(
+      credential.user,
+      {
+        email: payload?.email,
+        handle: payload?.handle,
+        displayName: requestedDisplayName,
+      },
+      true
+    );
+
+    setSession(response.token, response.refreshToken);
+    return response;
+  } catch (error) {
+    throw new Error(normalizeFirebaseAuthError(error, "Registration failed"));
+  }
 }
 
 export async function login(payload) {
-  const response = await request("/auth/login", {
-    method: "POST",
-    body: JSON.stringify(payload),
-  });
-  await syncAuthUserToFirestore(response?.user).catch(() => {
-    // Keep auth flow working even if Firestore sync fails.
-  });
-  return response;
+  try {
+    const credential = await signInWithEmailAndPassword(
+      firebaseAuth,
+      String(payload?.email || "").trim(),
+      String(payload?.password || "")
+    );
+
+    const response = await buildFirebaseSessionResponse(credential.user, {}, true);
+    setSession(response.token, response.refreshToken);
+    return response;
+  } catch (error) {
+    throw new Error(normalizeFirebaseAuthError(error, "Login failed"));
+  }
 }
 
 export async function me() {
-  const response = await request("/auth/me");
-  await syncAuthUserToFirestore(response).catch(() => {
-    // Keep profile flow working even if Firestore sync fails.
-  });
-  return response;
+  const authUser = await waitForFirebaseAuthUser();
+  if (!authUser) {
+    clearSession();
+    throw new Error("Authentication required");
+  }
+
+  const response = await buildFirebaseSessionResponse(authUser, {}, true);
+  setSession(response.token, response.refreshToken);
+  return response.user;
 }
 
 export function logout() {
-  return request("/auth/logout", { method: "POST" }).catch(() => null);
+  return signOut(firebaseAuth)
+    .then(() => null)
+    .catch(() => null);
 }
 
 export function getSuggestedUsers() {

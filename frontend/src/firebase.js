@@ -1,5 +1,6 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { getAnalytics, isSupported } from "firebase/analytics";
+import { browserLocalPersistence, getAuth, setPersistence } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -14,8 +15,13 @@ const firebaseConfig = {
 
 export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
 export const firestoreDb = getFirestore(firebaseApp);
+export const firebaseAuth = getAuth(firebaseApp);
 
 if (typeof window !== "undefined") {
+  setPersistence(firebaseAuth, browserLocalPersistence).catch(() => {
+    // Persistence may fail in strict browser privacy modes.
+  });
+
   isSupported()
     .then((supported) => {
       if (supported) {

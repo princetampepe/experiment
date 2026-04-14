@@ -456,14 +456,12 @@ function App() {
   const bootstrap = useCallback(async () => {
     try {
       setError("");
-      if (getToken()) {
-        try {
-          const meData = await me();
-          setCurrentUser(meData);
-        } catch {
-          clearSession();
-          setCurrentUser(null);
-        }
+      try {
+        const meData = await me();
+        setCurrentUser(meData);
+      } catch {
+        clearSession();
+        setCurrentUser(null);
       }
       await loadSidebarData();
     } catch (err) {

@@ -71,9 +71,47 @@ function parseNumericId(value) {
   return numeric;
 }
 
+function normalizeUserId(value) {
+  if (value == null) {
+    return null;
+  }
+
+  const text = String(value).trim();
+  if (!text) {
+    return null;
+  }
+
+  if (/^-?\d+$/.test(text)) {
+    const numeric = Number(text);
+    if (Number.isSafeInteger(numeric)) {
+      return String(numeric);
+    }
+  }
+
+  return text;
+}
+
+function userIdsEqual(left, right) {
+  const normalizedLeft = normalizeUserId(left);
+  const normalizedRight = normalizeUserId(right);
+  return normalizedLeft != null && normalizedLeft === normalizedRight;
+}
+
+function buildHandleCandidate(input, fallback = "user") {
+  const cleaned = String(input || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^@+/, "")
+    .replace(/[^a-z0-9_]/g, "")
+    .slice(0, 20);
+
+  const base = cleaned || String(fallback || "user").replace(/[^a-z0-9_]/gi, "").toLowerCase().slice(0, 20) || "user";
+  return `@${base}`;
+}
+
 function getCurrentUserId(optional = true) {
   const payload = decodeTokenPayload(readToken());
-  const id = parseNumericId(payload?.uid);
+  const id = normalizeUserId(payload?.uid ?? payload?.user_id ?? payload?.sub);
 
   if (!optional && id == null) {
     throw new Error("Authentication required");
@@ -176,7 +214,7 @@ function normalizePostResponse(rawPost, docId, viewerId = null) {
   const pollOptions = normalizeStringArray(rawPost.pollOptions || [], 4);
   const pollVotes = rawPost.pollVotes && typeof rawPost.pollVotes === "object" ? rawPost.pollVotes : {};
   const voterUserIds = Array.isArray(rawPost.pollVoterUserIds)
-    ? rawPost.pollVoterUserIds.map((value) => parseNumericId(value)).filter((value) => value != null)
+    ? rawPost.pollVoterUserIds.map((value) => normalizeUserId(value)).filter((value) => value != null)
     : [];
 
   const totalVotes = pollOptions.reduce((sum, option) => sum + Number(pollVotes[option] || 0), 0);
@@ -191,13 +229,13 @@ function normalizePostResponse(rawPost, docId, viewerId = null) {
           };
         }),
         totalVotes,
-        hasVoted: viewerId != null && voterUserIds.includes(viewerId),
+        hasVoted: viewerId != null && voterUserIds.includes(normalizeUserId(viewerId)),
       }
     : null;
 
   const normalized = {
     id: asSerializableId(docId),
-    authorUserId: parseNumericId(rawPost.authorUserId),
+    authorUserId: normalizeUserId(rawPost.authorUserId),
     author: rawPost.author || "Unknown",
     handle: rawPost.handle || "@unknown",
     content: rawPost.content || "",
@@ -236,9 +274,9 @@ function scorePost(post, viewerId, followedSet) {
     + (post.bookmarkCount * 1.9);
 
   let relationshipBoost = 0;
-  const authorId = parseNumericId(post.authorUserId);
+  const authorId = normalizeUserId(post.authorUserId);
   if (viewerId != null && authorId != null) {
-    if (authorId === viewerId) {
+    if (authorId === normalizeUserId(viewerId)) {
       relationshipBoost = 9;
     } else if (followedSet.has(authorId)) {
       relationshipBoost = 6.5;
@@ -398,11 +436,22 @@ async function ensureFirestoreSeedData() {
 }
 
 function normalizeUser(rawUser, id) {
+  const normalizedId = normalizeUserId(rawUser.id)
+    ?? normalizeUserId(rawUser.authUid)
+    ?? normalizeUserId(rawUser.uid)
+    ?? normalizeUserId(id);
+  const inferredHandleSource = rawUser.handle
+    || rawUser.displayName
+    || rawUser.email
+    || normalizedId
+    || "user";
+
   return {
-    id: parseNumericId(rawUser.id) ?? parseNumericId(id),
+    id: normalizedId,
+    authUid: normalizeUserId(rawUser.authUid) ?? normalizedId,
     email: rawUser.email || "",
-    handle: rawUser.handle || `@user${id}`,
-    displayName: rawUser.displayName || `User ${id}`,
+    handle: rawUser.handle || buildHandleCandidate(inferredHandleSource, normalizedId || "user"),
+    displayName: rawUser.displayName || `User ${normalizedId || "unknown"}`,
     bio: rawUser.bio || "",
     createdAtMs: Number(rawUser.createdAtMs || 0),
   };
@@ -426,8 +475,8 @@ async function getFollows() {
   const followDocs = await getAllCollectionDocs(FOLLOWS_COLLECTION);
   return followDocs
     .map((follow) => ({
-      followerId: parseNumericId(follow.followerId),
-      followingId: parseNumericId(follow.followingId),
+      followerId: normalizeUserId(follow.followerId),
+      followingId: normalizeUserId(follow.followingId),
       createdAtMs: Number(follow.createdAtMs || 0),
     }))
     .filter((follow) => follow.followerId != null && follow.followingId != null);
@@ -443,11 +492,20 @@ async function getCurrentUserProfile() {
   }
 
   const payload = decodeTokenPayload(readToken()) || {};
+  const inferredHandle = buildHandleCandidate(
+    payload.handle || payload.preferred_username || payload.name || payload.email || actorId,
+    actorId
+  );
+  const inferredDisplayName = String(payload.name || payload.display_name || "")
+    .trim()
+    || inferredHandle.replace(/^@/, "")
+    || `User ${actorId}`;
   const profile = {
     id: actorId,
-    email: payload.sub || "",
-    handle: payload.handle || `@user${actorId}`,
-    displayName: payload.handle ? payload.handle.replace(/^@/, "") : `User ${actorId}`,
+    authUid: actorId,
+    email: payload.email || "",
+    handle: inferredHandle,
+    displayName: inferredDisplayName,
     bio: "Building in public on Pulse.",
     createdAtMs: nowMs(),
   };
@@ -461,7 +519,7 @@ async function getCurrentUserProfile() {
 }
 
 async function createNotification(recipientId, type, message) {
-  const targetId = parseNumericId(recipientId);
+  const targetId = normalizeUserId(recipientId);
   if (targetId == null) {
     return;
   }
@@ -490,7 +548,7 @@ function buildUserProfile(user, follows, currentUserId) {
   const followers = follows.filter((follow) => follow.followingId === user.id).length;
   const following = follows.filter((follow) => follow.followerId === user.id).length;
   const followedByCurrentUser = follows.some((follow) => (
-    follow.followerId === currentUserId && follow.followingId === user.id
+    follow.followerId === normalizeUserId(currentUserId) && follow.followingId === user.id
   ));
 
   return {
@@ -506,11 +564,13 @@ function buildUserProfile(user, follows, currentUserId) {
 }
 
 export async function syncAuthUserToFirestore(user) {
-  if (!user || user.id == null) {
+  if (!user) {
     return;
   }
 
-  const userId = parseNumericId(user.id);
+  const userId = normalizeUserId(user.authUid)
+    ?? normalizeUserId(user.uid)
+    ?? normalizeUserId(user.id);
   if (userId == null) {
     return;
   }
@@ -521,15 +581,21 @@ export async function syncAuthUserToFirestore(user) {
     ? Number(current.data().createdAtMs || nowMs())
     : nowMs();
 
-  await setDoc(ref, {
+  const handle = buildHandleCandidate(user.handle || user.displayName || user.email || userId, userId);
+  const displayName = String(user.displayName || "").trim() || handle.replace(/^@/, "") || `User ${userId}`;
+  const mergedProfile = {
     id: userId,
+    authUid: userId,
     email: user.email || "",
-    handle: user.handle || `@user${userId}`,
-    displayName: user.displayName || `User ${userId}`,
+    handle,
+    displayName,
     bio: user.bio || "",
     createdAtMs,
     updatedAtMs: nowMs(),
-  }, { merge: true });
+  };
+
+  await setDoc(ref, mergedProfile, { merge: true });
+  return normalizeUser(mergedProfile, userId);
 }
 
 export async function getPostsFromFirestore({ query = "", page = 0, size = 10 } = {}) {
@@ -578,7 +644,7 @@ export async function getPersonalizedFeedFromFirestore({ query = "", page = 0, s
   const postDocs = await getAllCollectionDocs(POSTS_COLLECTION);
   const posts = postDocs
     .filter((rawPost) => {
-      const authorUserId = parseNumericId(rawPost.authorUserId);
+      const authorUserId = normalizeUserId(rawPost.authorUserId);
       return authorUserId === viewerId || followedSet.has(authorUserId);
     })
     .map((rawPost) => normalizePostResponse(rawPost, rawPost.id, viewerId));
@@ -649,7 +715,7 @@ export async function editPostInFirestore(postId, content) {
   }
 
   const current = snap.data();
-  if (parseNumericId(current.authorUserId) !== actorId) {
+  if (!userIdsEqual(current.authorUserId, actorId)) {
     throw new Error("Only the post author can edit this post");
   }
 
@@ -683,10 +749,10 @@ export async function votePollInFirestore(postId, option) {
   }
 
   const voterIds = Array.isArray(current.pollVoterUserIds)
-    ? current.pollVoterUserIds.map((value) => parseNumericId(value)).filter((value) => value != null)
+    ? current.pollVoterUserIds.map((value) => normalizeUserId(value)).filter((value) => value != null)
     : [];
 
-  if (voterIds.includes(actorId)) {
+  if (voterIds.includes(normalizeUserId(actorId))) {
     throw new Error("You already voted in this poll");
   }
 
@@ -695,7 +761,7 @@ export async function votePollInFirestore(postId, option) {
 
   const updates = {
     pollVotes: nextVotes,
-    pollVoterUserIds: [...voterIds, actorId],
+    pollVoterUserIds: [...voterIds, normalizeUserId(actorId)],
   };
 
   await updateDoc(ref, updates);
@@ -728,8 +794,8 @@ export async function engageInFirestore(postId, action) {
   const current = snap.data();
   const normalizedAction = String(action || "").toLowerCase();
 
-  const likedUserIds = normalizeStringArray(current.likedUserIds || [], 500).map((value) => parseNumericId(value)).filter((value) => value != null);
-  const repostedUserIds = normalizeStringArray(current.repostedUserIds || [], 500).map((value) => parseNumericId(value)).filter((value) => value != null);
+  const likedUserIds = normalizeStringArray(current.likedUserIds || [], 500).map((value) => normalizeUserId(value)).filter((value) => value != null);
+  const repostedUserIds = normalizeStringArray(current.repostedUserIds || [], 500).map((value) => normalizeUserId(value)).filter((value) => value != null);
 
   const updates = {};
   let notifyAuthor = false;
@@ -761,8 +827,8 @@ export async function engageInFirestore(postId, action) {
   }
 
   const merged = { ...current, ...updates };
-  const authorUserId = parseNumericId(merged.authorUserId);
-  if (notifyAuthor && authorUserId != null && authorUserId !== actorId) {
+  const authorUserId = normalizeUserId(merged.authorUserId);
+  if (notifyAuthor && authorUserId != null && !userIdsEqual(authorUserId, actorId)) {
     await createNotification(authorUserId, normalizedAction, `${actor.displayName} engaged with your post`);
   }
 
@@ -827,11 +893,11 @@ export async function followUserInFirestore(userId) {
   await ensureFirestoreSeedData();
 
   const actor = await getCurrentUserProfile();
-  const targetId = parseNumericId(userId);
+  const targetId = normalizeUserId(userId);
   if (targetId == null) {
     throw new Error("Target user id is required");
   }
-  if (targetId === actor.id) {
+  if (userIdsEqual(targetId, actor.id)) {
     throw new Error("You cannot follow yourself");
   }
 
@@ -856,7 +922,7 @@ export async function unfollowUserInFirestore(userId) {
   await ensureFirestoreSeedData();
 
   const actor = await getCurrentUserProfile();
-  const targetId = parseNumericId(userId);
+  const targetId = normalizeUserId(userId);
   if (targetId == null) {
     throw new Error("Target user id is required");
   }
@@ -880,7 +946,7 @@ export async function getNotificationsFromFirestore() {
   const notifications = await getAllCollectionDocs(NOTIFICATIONS_COLLECTION);
 
   return notifications
-    .filter((item) => parseNumericId(item.recipientId) === actorId)
+    .filter((item) => userIdsEqual(item.recipientId, actorId))
     .sort((left, right) => Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0))
     .slice(0, 40)
     .map((item) => normalizeNotification(item, item.id));
@@ -920,7 +986,7 @@ export function createNotificationStreamFromFirestore(onNotification, onError) {
           raw: item.data(),
           normalized: normalizeNotification(item.data(), item.id),
         }))
-        .filter((item) => parseNumericId(item.raw.recipientId) === actorId)
+        .filter((item) => userIdsEqual(item.raw.recipientId, actorId))
         .map((item) => item.normalized)
         .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
 
@@ -1083,8 +1149,8 @@ export async function addCommentInFirestore(postId, content) {
     replyCount: nextReplyCount,
   });
 
-  const authorUserId = parseNumericId(post.authorUserId);
-  if (authorUserId != null && authorUserId !== actor.id) {
+  const authorUserId = normalizeUserId(post.authorUserId);
+  if (authorUserId != null && !userIdsEqual(authorUserId, actor.id)) {
     await createNotification(authorUserId, "comment", `${actor.displayName} commented on your post`);
   }
 
@@ -1092,16 +1158,18 @@ export async function addCommentInFirestore(postId, content) {
 }
 
 function normalizeMessage(rawMessage, id, currentUserId) {
+  const senderId = normalizeUserId(rawMessage.senderId);
+  const recipientId = normalizeUserId(rawMessage.recipientId);
   return {
     id: asSerializableId(id),
-    senderId: parseNumericId(rawMessage.senderId),
+    senderId: asSerializableId(senderId ?? rawMessage.senderId),
     senderDisplayName: rawMessage.senderDisplayName || "Unknown",
-    recipientId: parseNumericId(rawMessage.recipientId),
+    recipientId: asSerializableId(recipientId ?? rawMessage.recipientId),
     recipientDisplayName: rawMessage.recipientDisplayName || "Unknown",
     content: rawMessage.content || "",
     createdAt: toIso(rawMessage.createdAtMs),
     readAt: rawMessage.readAtMs ? toIso(rawMessage.readAtMs) : null,
-    mine: parseNumericId(rawMessage.senderId) === currentUserId,
+    mine: userIdsEqual(senderId, currentUserId),
   };
 }
 
@@ -1111,14 +1179,14 @@ export async function getMessageInboxFromFirestore() {
   const actorId = getCurrentUserId(false);
   const messages = await getAllCollectionDocs(MESSAGES_COLLECTION);
   const relevant = messages
-    .filter((message) => parseNumericId(message.senderId) === actorId || parseNumericId(message.recipientId) === actorId)
+    .filter((message) => userIdsEqual(message.senderId, actorId) || userIdsEqual(message.recipientId, actorId))
     .sort((left, right) => Number(right.createdAtMs || 0) - Number(left.createdAtMs || 0));
 
   const grouped = new Map();
   for (const message of relevant) {
-    const senderId = parseNumericId(message.senderId);
-    const recipientId = parseNumericId(message.recipientId);
-    const peerId = senderId === actorId ? recipientId : senderId;
+    const senderId = normalizeUserId(message.senderId);
+    const recipientId = normalizeUserId(message.recipientId);
+    const peerId = userIdsEqual(senderId, actorId) ? recipientId : senderId;
 
     if (peerId == null || grouped.has(peerId)) {
       continue;
@@ -1138,13 +1206,13 @@ export async function getMessageInboxFromFirestore() {
       };
 
       const unreadCount = relevant.filter((message) => (
-        parseNumericId(message.senderId) === peerId
-        && parseNumericId(message.recipientId) === actorId
+        userIdsEqual(message.senderId, peerId)
+        && userIdsEqual(message.recipientId, actorId)
         && !message.readAtMs
       )).length;
 
       return {
-        peerId,
+        peerId: asSerializableId(peerId),
         peerHandle: peer.handle,
         peerDisplayName: peer.displayName,
         peerBio: peer.bio,
@@ -1160,7 +1228,7 @@ export async function getMessageThreadFromFirestore(peerId) {
   await ensureFirestoreSeedData();
 
   const actorId = getCurrentUserId(false);
-  const normalizedPeerId = parseNumericId(peerId);
+  const normalizedPeerId = normalizeUserId(peerId);
   if (normalizedPeerId == null) {
     return [];
   }
@@ -1168,10 +1236,10 @@ export async function getMessageThreadFromFirestore(peerId) {
   const messages = await getAllCollectionDocs(MESSAGES_COLLECTION);
   return messages
     .filter((message) => {
-      const senderId = parseNumericId(message.senderId);
-      const recipientId = parseNumericId(message.recipientId);
-      return (senderId === actorId && recipientId === normalizedPeerId)
-        || (senderId === normalizedPeerId && recipientId === actorId);
+      const senderId = normalizeUserId(message.senderId);
+      const recipientId = normalizeUserId(message.recipientId);
+      return (userIdsEqual(senderId, actorId) && userIdsEqual(recipientId, normalizedPeerId))
+        || (userIdsEqual(senderId, normalizedPeerId) && userIdsEqual(recipientId, actorId));
     })
     .sort((left, right) => Number(left.createdAtMs || 0) - Number(right.createdAtMs || 0))
     .map((message) => normalizeMessage(message, message.id, actorId));
@@ -1181,8 +1249,8 @@ export async function sendMessageInFirestore(recipientId, content) {
   await ensureFirestoreSeedData();
 
   const actor = await getCurrentUserProfile();
-  const targetId = parseNumericId(recipientId);
-  if (targetId == null || targetId === actor.id) {
+  const targetId = normalizeUserId(recipientId);
+  if (targetId == null || userIdsEqual(targetId, actor.id)) {
     throw new Error("Invalid recipient");
   }
 
@@ -1211,15 +1279,15 @@ export async function sendMessageInFirestore(recipientId, content) {
 
 export async function markMessageThreadReadInFirestore(peerId) {
   const actorId = getCurrentUserId(false);
-  const normalizedPeerId = parseNumericId(peerId);
+  const normalizedPeerId = normalizeUserId(peerId);
   if (normalizedPeerId == null) {
     return { status: "ok" };
   }
 
   const messages = await getAllCollectionDocs(MESSAGES_COLLECTION);
   const unread = messages.filter((message) => (
-    parseNumericId(message.senderId) === normalizedPeerId
-    && parseNumericId(message.recipientId) === actorId
+    userIdsEqual(message.senderId, normalizedPeerId)
+    && userIdsEqual(message.recipientId, actorId)
     && !message.readAtMs
   ));
 
