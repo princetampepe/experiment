@@ -3,8 +3,8 @@
   --bg-2: #0d2b42;
   --bg-3: #052327;
   --ink: #f2fbff;
-  --muted: #c8dded;
-  --ink-dim: #a8c3d9;
+  --muted: #d6e9f6;
+  --ink-dim: #c4dcef;
   --line: rgba(178, 223, 250, 0.36);
   --glass: linear-gradient(155deg, rgba(18, 51, 74, 0.58), rgba(11, 34, 47, 0.48));
   --glass-strong: linear-gradient(150deg, rgba(22, 59, 84, 0.7), rgba(13, 39, 55, 0.58));
@@ -57,8 +57,9 @@ button:focus-visible,
 input:focus-visible,
 textarea:focus-visible,
 a:focus-visible {
-  outline: 2px solid rgba(157, 243, 229, 0.95);
+  outline: 2px solid rgba(236, 249, 255, 0.98);
   outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgba(7, 28, 42, 0.9), 0 0 0 6px rgba(136, 227, 255, 0.9);
 }
 
 .page-bg {
@@ -272,7 +273,7 @@ a:focus-visible {
 .auth-card input::placeholder,
 .comment-compose input::placeholder,
 .left-rail input::placeholder {
-  color: #bdd4e8;
+  color: #d8eaf8;
 }
 
 .auth-switch {
@@ -470,7 +471,7 @@ a:focus-visible {
 
 .panel-title-copy p {
   margin: 0;
-  color: var(--ink-dim);
+  color: var(--muted);
   font-size: 0.86rem;
 }
 
@@ -547,7 +548,7 @@ a:focus-visible {
 
 .panel-header input::placeholder,
 .composer textarea::placeholder {
-  color: #d9e7f7;
+  color: #e2effb;
 }
 
 .composer {
@@ -604,7 +605,7 @@ a:focus-visible {
 
 .feed-head p {
   margin: 0;
-  color: var(--ink-dim);
+  color: var(--muted);
   font-weight: 600;
 }
 
@@ -617,9 +618,9 @@ a:focus-visible {
 .metric-chip {
   border: 1px solid rgba(182, 228, 252, 0.3);
   border-radius: 999px;
-  background: rgba(9, 35, 51, 0.45);
-  color: var(--ink-dim);
-  font-size: 0.78rem;
+  background: rgba(8, 30, 44, 0.58);
+  color: var(--muted);
+  font-size: 0.82rem;
   font-weight: 600;
   padding: 5px 10px;
 }
@@ -1077,7 +1078,7 @@ a:focus-visible {
 
 .stats-grid p {
   margin: 0;
-  color: var(--ink-dim);
+  color: var(--muted);
   font-size: 0.85rem;
 }
 
@@ -1112,7 +1113,7 @@ a:focus-visible {
 .gaps-list p,
 .gaps-list small {
   margin: 6px 0 0;
-  color: var(--ink-dim);
+  color: var(--muted);
 }
 
 .bars {
@@ -1154,6 +1155,9 @@ a:focus-visible {
 .notice {
   margin: 0 0 10px;
   padding: 10px;
+  border: 1px solid rgba(189, 231, 252, 0.34);
+  background: rgba(9, 31, 45, 0.56);
+  color: var(--muted);
 }
 
 .skeleton-grid {
@@ -1539,6 +1543,79 @@ a:focus-visible {
 
   .mobile-compose-btn {
     grid-column: 1 / -1;
+  }
+}
+
+@media (prefers-contrast: more) {
+  :root {
+    --muted: #e8f5ff;
+    --ink-dim: #deefff;
+    --line: rgba(214, 239, 255, 0.7);
+  }
+
+  .glass,
+  .post-card,
+  .composer,
+  .messages-inbox,
+  .messages-thread,
+  .trend-list li,
+  .gaps-list li,
+  .comment-item,
+  .message-bubble,
+  .metric-chip {
+    border-color: rgba(218, 240, 255, 0.82) !important;
+    background: rgba(5, 22, 33, 0.82) !important;
+  }
+
+  .nav-btn,
+  .actions button,
+  .message-peer-btn,
+  .poll-option,
+  .mobile-tab,
+  .mobile-compose-btn {
+    border-color: rgba(212, 239, 255, 0.88);
+    background: rgba(4, 22, 33, 0.82);
+  }
+
+  .panel-title-copy p,
+  .feed-head p,
+  .stats-grid p,
+  .gaps-list p,
+  .gaps-list small,
+  .message-peer-btn p,
+  .messages-inbox-head small,
+  .peer-line small,
+  .peer-meta small,
+  .messages-thread-head small,
+  .message-bubble small {
+    color: #e8f5ff;
+  }
+}
+
+@media (forced-colors: active) {
+  .glass,
+  .post-card,
+  .messages-inbox,
+  .messages-thread,
+  .trend-list li,
+  .gaps-list li,
+  .comment-item,
+  .message-bubble,
+  .notice {
+    border: 1px solid CanvasText;
+    background: Canvas;
+  }
+
+  .hero-btn,
+  .nav-btn,
+  .actions button,
+  .mobile-tab,
+  .mobile-compose-btn,
+  .poll-option,
+  .message-peer-btn {
+    border: 1px solid ButtonText;
+    background: ButtonFace;
+    color: ButtonText;
   }
 }
 
