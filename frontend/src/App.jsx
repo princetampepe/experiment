@@ -866,6 +866,51 @@ function App() {
 
   const canCompose = activeView === "Home" || activeView === "Explore";
   const shouldShowRightCol = isFeedView && (!isMobileViewport || showMobileInsights);
+  const panelSubtitle = useMemo(() => {
+    if (activeView === "Home") {
+      return showPersonalized && currentUser
+        ? "Personalized posts based on your follows and engagement."
+        : "Live community updates from across your network.";
+    }
+
+    if (activeView === "Explore") {
+      return debouncedQuery.trim()
+        ? `Exploring results for "${debouncedQuery.trim()}".`
+        : "Discover trending conversations, tags, and creators.";
+    }
+
+    if (activeView === "Bookmarks") {
+      return `${visiblePosts.length} saved posts to revisit.`;
+    }
+
+    if (activeView === "Notifications") {
+      return `${unreadCount} unread updates waiting for you.`;
+    }
+
+    if (activeView === "Messages") {
+      return currentUser
+        ? `${messageInbox.length} active conversations.`
+        : "Sign in to access your inbox and direct messages.";
+    }
+
+    if (activeView === "Dashboard") {
+      return "Performance trends, engagement, and product gaps at a glance.";
+    }
+
+    if (activeView === "Lists") {
+      return "Create focused streams by grouping people and topics.";
+    }
+
+    return "Stay connected with your Pulse workspace.";
+  }, [
+    activeView,
+    showPersonalized,
+    currentUser,
+    debouncedQuery,
+    visiblePosts.length,
+    unreadCount,
+    messageInbox.length,
+  ]);
 
   const focusComposer = useCallback(() => {
     setActiveView("Home");
@@ -975,7 +1020,10 @@ function App() {
         <main className="center-col">
           <header className="glass panel-header">
             <div className="panel-title-wrap">
-              <h2>{activeView}</h2>
+              <div className="panel-title-copy">
+                <h2>{activeView}</h2>
+                <p>{panelSubtitle}</p>
+              </div>
               {isFeedView ? (
                 <span className={`live-indicator ${feedLivePulse ? "pulse" : ""}`}>
                   Live Feed
@@ -986,7 +1034,7 @@ function App() {
               {isMobileViewport && isFeedView ? (
                 <button
                   type="button"
-                  className={`nav-btn ${showMobileInsights ? "active" : ""}`}
+                  className={`nav-btn compact-btn ${showMobileInsights ? "active" : ""}`}
                   onClick={() => setShowMobileInsights((prev) => !prev)}
                 >
                   {showMobileInsights ? "Hide Insights" : "Show Insights"}
@@ -995,10 +1043,19 @@ function App() {
               {currentUser && isFeedView ? (
                 <button
                   type="button"
-                  className={`nav-btn ${showPersonalized ? "active" : ""}`}
+                  className={`nav-btn compact-btn ${showPersonalized ? "active" : ""}`}
                   onClick={() => setShowPersonalized((prev) => !prev)}
                 >
                   {showPersonalized ? "Viewing Personalized" : "Switch to Personalized"}
+                </button>
+              ) : null}
+              {isFeedView && query.trim() ? (
+                <button
+                  type="button"
+                  className="nav-btn compact-btn"
+                  onClick={() => setQuery("")}
+                >
+                  Clear Search
                 </button>
               ) : null}
               {isFeedView ? (
@@ -1064,6 +1121,18 @@ function App() {
             <div className="feed-head">
               <h3>{feedTitle}</h3>
               <p>{activeView === "Bookmarks" ? visiblePosts.length : feedTotal} posts</p>
+            </div>
+
+            <div className="feed-metrics" aria-label="Feed context">
+              <span className="metric-chip">
+                Showing {visiblePosts.length}
+              </span>
+              <span className="metric-chip">
+                Muted filters: {mutedWords.length}
+              </span>
+              {showPersonalized && currentUser ? (
+                <span className="metric-chip accent">Personalized stream active</span>
+              ) : null}
             </div>
 
             {loading && visiblePosts.length === 0 ? (
