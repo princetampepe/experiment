@@ -30,6 +30,10 @@ public class FeedStreamService {
     }
 
     public void publish(PostDtos.FeedEventResponse payload) {
+        if (payload == null) {
+            return;
+        }
+
         for (SseEmitter emitter : emitters) {
             try {
                 emitter.send(SseEmitter.event().name("feed").data(payload));

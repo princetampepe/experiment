@@ -2,6 +2,7 @@ package com.pulse.api;
 
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -26,7 +27,7 @@ public class MessageController {
 
     @GetMapping("/inbox")
     public List<PostDtos.ConversationSummaryResponse> inbox(org.springframework.security.core.Authentication authentication) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return messageService.inbox(principal);
     }
 
@@ -35,7 +36,7 @@ public class MessageController {
             @PathVariable Long peerId,
             org.springframework.security.core.Authentication authentication
     ) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return messageService.thread(principal, peerId);
     }
 
@@ -45,7 +46,7 @@ public class MessageController {
             @Valid @RequestBody PostDtos.SendMessageRequest request,
             org.springframework.security.core.Authentication authentication
     ) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return messageService.send(principal, request);
     }
 
@@ -54,8 +55,15 @@ public class MessageController {
             @PathVariable Long peerId,
             org.springframework.security.core.Authentication authentication
     ) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         messageService.markThreadRead(principal, peerId);
         return Map.of("status", "ok");
+    }
+
+    private UserPrincipal requirePrincipal(org.springframework.security.core.Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal principal)) {
+            throw new AccessDeniedException("Authentication required");
+        }
+        return principal;
     }
 }

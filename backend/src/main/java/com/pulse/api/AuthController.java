@@ -8,6 +8,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.security.access.AccessDeniedException;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -37,13 +38,20 @@ public class AuthController {
     @PostMapping("/logout")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void logout(org.springframework.security.core.Authentication authentication) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         authService.logout(principal);
     }
 
     @GetMapping("/me")
     public PostDtos.UserProfileResponse me(org.springframework.security.core.Authentication authentication) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return authService.me(principal);
+    }
+
+    private UserPrincipal requirePrincipal(org.springframework.security.core.Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal principal)) {
+            throw new AccessDeniedException("Authentication required");
+        }
+        return principal;
     }
 }

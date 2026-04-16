@@ -2,6 +2,7 @@ package com.pulse.api;
 
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,7 +33,7 @@ public class SocialController {
 
     @GetMapping("/users/suggested")
     public List<PostDtos.UserProfileResponse> suggestedUsers(org.springframework.security.core.Authentication authentication) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return socialService.suggestedUsers(principal);
     }
 
@@ -41,7 +42,7 @@ public class SocialController {
             @PathVariable("id") Long id,
             org.springframework.security.core.Authentication authentication
     ) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return socialService.follow(principal, id);
     }
 
@@ -50,7 +51,7 @@ public class SocialController {
             @PathVariable("id") Long id,
             org.springframework.security.core.Authentication authentication
     ) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return socialService.unfollow(principal, id);
     }
 
@@ -61,19 +62,19 @@ public class SocialController {
             @RequestParam(defaultValue = "10") int size,
             org.springframework.security.core.Authentication authentication
     ) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return socialService.personalizedFeedPage(principal, query, page, size);
     }
 
     @GetMapping("/notifications")
     public List<PostDtos.NotificationResponse> notifications(org.springframework.security.core.Authentication authentication) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return socialService.notifications(principal);
     }
 
     @GetMapping("/notifications/unread-count")
     public java.util.Map<String, Long> unreadCount(org.springframework.security.core.Authentication authentication) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return java.util.Map.of("count", socialService.unreadNotificationCount(principal));
     }
 
@@ -82,7 +83,7 @@ public class SocialController {
             @PathVariable("id") Long id,
             org.springframework.security.core.Authentication authentication
     ) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         socialService.markNotificationRead(principal, id);
         return java.util.Map.of("status", "ok");
     }
@@ -102,7 +103,7 @@ public class SocialController {
             @Valid @RequestBody PostDtos.CreateCommentRequest request,
             org.springframework.security.core.Authentication authentication
     ) {
-        UserPrincipal principal = (UserPrincipal) authentication.getPrincipal();
+        UserPrincipal principal = requirePrincipal(authentication);
         return socialService.addComment(principal, id, request);
     }
 
@@ -130,5 +131,12 @@ public class SocialController {
             user.getHandle(),
             user.getDisplayName()
         );
+    }
+
+    private UserPrincipal requirePrincipal(org.springframework.security.core.Authentication authentication) {
+        if (authentication == null || !(authentication.getPrincipal() instanceof UserPrincipal principal)) {
+            throw new AccessDeniedException("Authentication required");
+        }
+        return principal;
     }
 }

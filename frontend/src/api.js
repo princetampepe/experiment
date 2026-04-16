@@ -1,36 +1,3 @@
-import {
-  addCommentInFirestore,
-  createFeedStreamFromFirestore,
-  createNotificationStreamFromFirestore,
-  createPostInFirestore,
-  editPostInFirestore,
-  engageInFirestore,
-  followUserInFirestore,
-  getCommentsFromFirestore,
-  getDashboardFromFirestore,
-  getMessageInboxFromFirestore,
-  getMessageThreadFromFirestore,
-  getNotificationsFromFirestore,
-  getPersonalizedFeedFromFirestore,
-  getPostInsightsFromFirestore,
-  getPostsFromFirestore,
-  getSuggestedUsersFromFirestore,
-  getUnreadNotificationCountFromFirestore,
-  markMessageThreadReadInFirestore,
-  markNotificationReadInFirestore,
-  sendMessageInFirestore,
-  syncAuthUserToFirestore,
-  unfollowUserInFirestore,
-  votePollInFirestore,
-} from "./firestoreDb";
-import {
-  createUserWithEmailAndPassword,
-  onAuthStateChanged,
-  signInWithEmailAndPassword,
-  signOut,
-  updateProfile,
-} from "firebase/auth";
-import { firebaseAuth } from "./firebase";
 import { buildHandleCandidate, decodeJwtPayload } from "./authIdentity";
 
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://localhost:8080/api").replace(/\/$/, "");
@@ -66,6 +33,47 @@ const fallbackGaps = [
     suggestedImplementation: "Implement report queues and moderation status flow.",
   },
 ];
+
+let firestoreModulePromise = null;
+let firebaseModulePromise = null;
+let firebaseAuthFunctionsPromise = null;
+
+function loadFirestoreModule() {
+  if (!firestoreModulePromise) {
+    firestoreModulePromise = import("./firestoreDb");
+  }
+  return firestoreModulePromise;
+}
+
+async function runFirestoreOperation(operation, ...args) {
+  const module = await loadFirestoreModule();
+  const handler = module[operation];
+
+  if (typeof handler !== "function") {
+    throw new Error(`Firestore operation unavailable: ${operation}`);
+  }
+
+  return handler(...args);
+}
+
+function loadFirebaseModule() {
+  if (!firebaseModulePromise) {
+    firebaseModulePromise = import("./firebase");
+  }
+  return firebaseModulePromise;
+}
+
+function loadFirebaseAuthFunctions() {
+  if (!firebaseAuthFunctionsPromise) {
+    firebaseAuthFunctionsPromise = import("firebase/auth");
+  }
+  return firebaseAuthFunctionsPromise;
+}
+
+async function getFirebaseAuthInstance() {
+  const module = await loadFirebaseModule();
+  return module?.firebaseAuth || null;
+}
 
 function mapFirebaseUserProfile(authUser, profileOverrides = {}) {
   const uid = String(authUser?.uid || "").trim();
@@ -109,6 +117,11 @@ function normalizeFirebaseAuthError(error, fallbackMessage) {
 }
 
 async function waitForFirebaseAuthUser() {
+  const firebaseAuth = await getFirebaseAuthInstance();
+  if (!firebaseAuth) {
+    return null;
+  }
+
   if (firebaseAuth.currentUser) {
     return firebaseAuth.currentUser;
   }
@@ -116,6 +129,8 @@ async function waitForFirebaseAuthUser() {
   if (typeof window === "undefined") {
     return firebaseAuth.currentUser;
   }
+
+  const { onAuthStateChanged } = await loadFirebaseAuthFunctions();
 
   return new Promise((resolve) => {
     let resolved = false;
@@ -151,7 +166,8 @@ async function buildFirebaseSessionResponse(authUser, profileOverrides = {}, for
   const token = await authUser.getIdToken(forceRefresh);
   const refreshToken = authUser.refreshToken || "";
   const profileSeed = mapFirebaseUserProfile(authUser, profileOverrides);
-  const syncedProfile = await syncAuthUserToFirestore(profileSeed).catch(() => profileSeed);
+  const syncedProfile = await runFirestoreOperation("syncAuthUserToFirestore", profileSeed)
+    .catch(() => profileSeed);
 
   return {
     token,
@@ -208,7 +224,8 @@ function shouldRefresh(path) {
 }
 
 async function refreshSession() {
-  const authUser = firebaseAuth.currentUser;
+  const firebaseAuth = await getFirebaseAuthInstance();
+  const authUser = firebaseAuth?.currentUser;
   if (authUser) {
     try {
       const token = await authUser.getIdToken(true);
@@ -525,7 +542,7 @@ function buildFeedPath(basePath, { query = "", page = 0, size = 10 } = {}) {
 }
 
 export function getPosts(params = {}) {
-  return getPostsFromFirestore(params).catch(() => (
+  return runFirestoreOperation("getPostsFromFirestore", params).catch(() => (
     request(buildFeedPath("/posts", params)).catch(() => {
       const { query = "", page = 0, size = 10 } = params;
       const posts = filterPosts(readOfflinePosts(), query).sort(
@@ -545,11 +562,12 @@ export function getPosts(params = {}) {
 }
 
 export function getPersonalizedFeed(params = {}) {
-  return getPersonalizedFeedFromFirestore(params).catch(() => request(buildFeedPath("/feed/personalized", params)));
+  return runFirestoreOperation("getPersonalizedFeedFromFirestore", params)
+    .catch(() => request(buildFeedPath("/feed/personalized", params)));
 }
 
 export function createPost(payload) {
-  return createPostInFirestore(payload).catch(() => (
+  return runFirestoreOperation("createPostInFirestore", payload).catch(() => (
     request("/posts", {
       method: "POST",
       body: JSON.stringify({
@@ -590,7 +608,7 @@ export function createPost(payload) {
 }
 
 export function editPost(postId, content) {
-  return editPostInFirestore(postId, content).catch(() => (
+  return runFirestoreOperation("editPostInFirestore", postId, content).catch(() => (
     request(`/posts/${postId}`, {
       method: "PATCH",
       body: JSON.stringify({ content }),
@@ -619,7 +637,7 @@ export function editPost(postId, content) {
 }
 
 export function votePoll(postId, option) {
-  return votePollInFirestore(postId, option).catch(() => (
+  return runFirestoreOperation("votePollInFirestore", postId, option).catch(() => (
     request(`/posts/${postId}/poll/vote`, {
       method: "POST",
       body: JSON.stringify({ option }),
@@ -662,7 +680,7 @@ export function votePoll(postId, option) {
 }
 
 export function getPostInsights(postId) {
-  return getPostInsightsFromFirestore(postId).catch(() => (
+  return runFirestoreOperation("getPostInsightsFromFirestore", postId).catch(() => (
     request(`/posts/${postId}/insights`).catch(() => {
       const post = readOfflinePosts().find((item) => item.id === postId);
       if (!post) {
@@ -674,7 +692,7 @@ export function getPostInsights(postId) {
 }
 
 export function engage(postId, action) {
-  return engageInFirestore(postId, action).catch(() => (
+  return runFirestoreOperation("engageInFirestore", postId, action).catch(() => (
     request(`/posts/${postId}/engage`, {
       method: "POST",
       body: JSON.stringify({ action }),
@@ -738,7 +756,7 @@ export function engage(postId, action) {
 }
 
 export function getDashboard() {
-  return getDashboardFromFirestore().catch(() => (
+  return runFirestoreOperation("getDashboardFromFirestore").catch(() => (
     request("/dashboard").catch(() => {
       const posts = readOfflinePosts();
       return buildDashboardFromPosts(posts);
@@ -747,7 +765,27 @@ export function getDashboard() {
 }
 
 export async function register(payload) {
+  const firebaseAuth = await getFirebaseAuthInstance();
+  if (!firebaseAuth) {
+    const response = await request("/auth/register", {
+      method: "POST",
+      body: JSON.stringify({
+        email: String(payload?.email || "").trim(),
+        password: String(payload?.password || ""),
+        handle: String(payload?.handle || "").trim(),
+        displayName: String(payload?.displayName || "").trim(),
+      }),
+    });
+
+    if (response?.token && response?.refreshToken) {
+      setSession(response.token, response.refreshToken);
+    }
+
+    return response;
+  }
+
   try {
+    const { createUserWithEmailAndPassword, updateProfile } = await loadFirebaseAuthFunctions();
     const credential = await createUserWithEmailAndPassword(
       firebaseAuth,
       String(payload?.email || "").trim(),
@@ -779,7 +817,25 @@ export async function register(payload) {
 }
 
 export async function login(payload) {
+  const firebaseAuth = await getFirebaseAuthInstance();
+  if (!firebaseAuth) {
+    const response = await request("/auth/login", {
+      method: "POST",
+      body: JSON.stringify({
+        email: String(payload?.email || "").trim(),
+        password: String(payload?.password || ""),
+      }),
+    });
+
+    if (response?.token && response?.refreshToken) {
+      setSession(response.token, response.refreshToken);
+    }
+
+    return response;
+  }
+
   try {
+    const { signInWithEmailAndPassword } = await loadFirebaseAuthFunctions();
     const credential = await signInWithEmailAndPassword(
       firebaseAuth,
       String(payload?.email || "").trim(),
@@ -795,6 +851,11 @@ export async function login(payload) {
 }
 
 export async function me() {
+  const firebaseAuth = await getFirebaseAuthInstance();
+  if (!firebaseAuth) {
+    return request("/auth/me");
+  }
+
   const authUser = await waitForFirebaseAuthUser();
   if (!authUser) {
     clearSession();
@@ -806,18 +867,26 @@ export async function me() {
   return response.user;
 }
 
-export function logout() {
+export async function logout() {
+  const firebaseAuth = await getFirebaseAuthInstance();
+  if (!firebaseAuth) {
+    return request("/auth/logout", { method: "POST" })
+      .then(() => null)
+      .catch(() => null);
+  }
+
+  const { signOut } = await loadFirebaseAuthFunctions();
   return signOut(firebaseAuth)
     .then(() => null)
     .catch(() => null);
 }
 
 export function getSuggestedUsers() {
-  return getSuggestedUsersFromFirestore().catch(() => request("/users/suggested"));
+  return runFirestoreOperation("getSuggestedUsersFromFirestore").catch(() => request("/users/suggested"));
 }
 
 export function followUser(userId) {
-  return followUserInFirestore(userId).catch(() => (
+  return runFirestoreOperation("followUserInFirestore", userId).catch(() => (
     request(`/users/${userId}/follow`, {
       method: "POST",
     })
@@ -825,7 +894,7 @@ export function followUser(userId) {
 }
 
 export function unfollowUser(userId) {
-  return unfollowUserInFirestore(userId).catch(() => (
+  return runFirestoreOperation("unfollowUserInFirestore", userId).catch(() => (
     request(`/users/${userId}/follow`, {
       method: "DELETE",
     })
@@ -833,19 +902,21 @@ export function unfollowUser(userId) {
 }
 
 export function getNotifications() {
-  return getNotificationsFromFirestore().catch(() => request("/notifications"));
+  return runFirestoreOperation("getNotificationsFromFirestore").catch(() => request("/notifications"));
 }
 
 export function getMessageInbox() {
-  return getMessageInboxFromFirestore().catch(() => request("/messages/inbox").catch(() => []));
+  return runFirestoreOperation("getMessageInboxFromFirestore")
+    .catch(() => request("/messages/inbox").catch(() => []));
 }
 
 export function getMessageThread(peerId) {
-  return getMessageThreadFromFirestore(peerId).catch(() => request(`/messages/thread/${peerId}`).catch(() => []));
+  return runFirestoreOperation("getMessageThreadFromFirestore", peerId)
+    .catch(() => request(`/messages/thread/${peerId}`).catch(() => []));
 }
 
 export function sendMessage(recipientId, content) {
-  return sendMessageInFirestore(recipientId, content).catch(() => (
+  return runFirestoreOperation("sendMessageInFirestore", recipientId, content).catch(() => (
     request("/messages", {
       method: "POST",
       body: JSON.stringify({ recipientId, content }),
@@ -854,7 +925,7 @@ export function sendMessage(recipientId, content) {
 }
 
 export function markMessageThreadRead(peerId) {
-  return markMessageThreadReadInFirestore(peerId).catch(() => (
+  return runFirestoreOperation("markMessageThreadReadInFirestore", peerId).catch(() => (
     request(`/messages/thread/${peerId}/read`, {
       method: "PATCH",
     }).catch(() => ({ status: "ok" }))
@@ -862,20 +933,25 @@ export function markMessageThreadRead(peerId) {
 }
 
 export function getUnreadNotificationCount() {
-  return getUnreadNotificationCountFromFirestore().catch(() => request("/notifications/unread-count"));
+  return runFirestoreOperation("getUnreadNotificationCountFromFirestore")
+    .catch(() => request("/notifications/unread-count"));
 }
 
 export function markNotificationRead(notificationId) {
-  return markNotificationReadInFirestore(notificationId).catch(() => (
+  return runFirestoreOperation("markNotificationReadInFirestore", notificationId).catch(() => (
     request(`/notifications/${notificationId}/read`, {
       method: "PATCH",
     })
   ));
 }
 
-export function createNotificationStream(onNotification, onError) {
+export async function createNotificationStream(onNotification, onError) {
   try {
-    const firestoreStream = createNotificationStreamFromFirestore(onNotification, onError);
+    const firestoreStream = await runFirestoreOperation(
+      "createNotificationStreamFromFirestore",
+      onNotification,
+      onError
+    );
     if (firestoreStream) {
       return firestoreStream;
     }
@@ -909,9 +985,13 @@ export function createNotificationStream(onNotification, onError) {
   return source;
 }
 
-export function createFeedStream(onFeedEvent, onError) {
+export async function createFeedStream(onFeedEvent, onError) {
   try {
-    const firestoreStream = createFeedStreamFromFirestore(onFeedEvent, onError);
+    const firestoreStream = await runFirestoreOperation(
+      "createFeedStreamFromFirestore",
+      onFeedEvent,
+      onError
+    );
     if (firestoreStream) {
       return firestoreStream;
     }
@@ -942,11 +1022,12 @@ export function createFeedStream(onFeedEvent, onError) {
 }
 
 export function getComments(postId) {
-  return getCommentsFromFirestore(postId).catch(() => request(`/posts/${postId}/comments`));
+  return runFirestoreOperation("getCommentsFromFirestore", postId)
+    .catch(() => request(`/posts/${postId}/comments`));
 }
 
 export function addComment(postId, content) {
-  return addCommentInFirestore(postId, content).catch(() => (
+  return runFirestoreOperation("addCommentInFirestore", postId, content).catch(() => (
     request(`/posts/${postId}/comments`, {
       method: "POST",
       body: JSON.stringify({ content }),

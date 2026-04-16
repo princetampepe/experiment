@@ -523,7 +523,9 @@ function App() {
       return;
     }
 
-    const source = createNotificationStream(
+    let cancelled = false;
+
+    createNotificationStream(
       (notification) => {
         setNotifications((prev) => [notification, ...prev].slice(0, 30));
         setUnreadCount((prev) => prev + 1);
@@ -531,12 +533,24 @@ function App() {
       () => {
         // Keep existing state; manual reload still works.
       }
-    );
+    ).then((source) => {
+      if (cancelled) {
+        if (source) {
+          source.close();
+        }
+        return;
+      }
 
-    notificationStreamRef.current = source;
+      notificationStreamRef.current = source;
+    }).catch(() => {
+      // Keep existing state; manual reload still works.
+    });
+
     return () => {
-      if (source) {
-        source.close();
+      cancelled = true;
+      if (notificationStreamRef.current) {
+        notificationStreamRef.current.close();
+        notificationStreamRef.current = null;
       }
     };
   }, [currentUser]);
@@ -547,19 +561,33 @@ function App() {
       feedStreamRef.current = null;
     }
 
-    const source = createFeedStream(
+    let cancelled = false;
+
+    createFeedStream(
       (eventPayload) => {
         mergeIncomingPost(eventPayload?.post, eventPayload?.eventType || "post_updated");
       },
       () => {
         // Feed can still be refreshed manually.
       }
-    );
+    ).then((source) => {
+      if (cancelled) {
+        if (source) {
+          source.close();
+        }
+        return;
+      }
 
-    feedStreamRef.current = source;
+      feedStreamRef.current = source;
+    }).catch(() => {
+      // Feed can still be refreshed manually.
+    });
+
     return () => {
-      if (source) {
-        source.close();
+      cancelled = true;
+      if (feedStreamRef.current) {
+        feedStreamRef.current.close();
+        feedStreamRef.current = null;
       }
     };
   }, [mergeIncomingPost]);

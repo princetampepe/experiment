@@ -4,20 +4,29 @@ import { browserLocalPersistence, getAuth, setPersistence } from "firebase/auth"
 import { getFirestore } from "firebase/firestore";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBY92Efk8OdOaHGDF68kiPatX5Cq2Qzx_A",
-  authDomain: "pulsesocial-fe039.firebaseapp.com",
-  projectId: "pulsesocial-fe039",
-  storageBucket: "pulsesocial-fe039.firebasestorage.app",
-  messagingSenderId: "751042817031",
-  appId: "1:751042817031:web:ad20abd8e74a2ad9e9cea2",
-  measurementId: "G-KN3X72EEZ0",
+  apiKey: import.meta.env.VITE_FIREBASE_API_KEY || "",
+  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN || "",
+  projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID || "",
+  storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET || "",
+  messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
+  appId: import.meta.env.VITE_FIREBASE_APP_ID || "",
+  measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID || "",
 };
 
-export const firebaseApp = getApps().length ? getApp() : initializeApp(firebaseConfig);
-export const firestoreDb = getFirestore(firebaseApp);
-export const firebaseAuth = getAuth(firebaseApp);
+const requiredFirebaseKeys = ["apiKey", "authDomain", "projectId", "appId"];
+export const firebaseEnabled = requiredFirebaseKeys.every((key) => {
+  const value = firebaseConfig[key];
+  return Boolean(String(value || "").trim());
+});
 
-if (typeof window !== "undefined") {
+export const firebaseApp = firebaseEnabled
+  ? (getApps().length ? getApp() : initializeApp(firebaseConfig))
+  : null;
+
+export const firestoreDb = firebaseApp ? getFirestore(firebaseApp) : null;
+export const firebaseAuth = firebaseApp ? getAuth(firebaseApp) : null;
+
+if (firebaseApp && firebaseAuth && typeof window !== "undefined") {
   setPersistence(firebaseAuth, browserLocalPersistence).catch(() => {
     // Persistence may fail in strict browser privacy modes.
   });

@@ -12,6 +12,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 @Service
 @Transactional
@@ -81,7 +82,7 @@ public class MessageService {
     }
 
     public List<PostDtos.MessageResponse> thread(UserPrincipal principal, Long peerId) {
-        Long safePeerId = normalizePeer(principal, peerId);
+        Long safePeerId = Objects.requireNonNull(normalizePeer(principal, peerId));
         appUserRepository.findById(safePeerId)
                 .orElseThrow(() -> new IllegalArgumentException("Conversation peer not found"));
 
@@ -104,7 +105,7 @@ public class MessageService {
     }
 
     public PostDtos.MessageResponse send(UserPrincipal principal, PostDtos.SendMessageRequest request) {
-        Long safeRecipientId = normalizePeer(principal, request.recipientId());
+        Long safeRecipientId = Objects.requireNonNull(normalizePeer(principal, request.recipientId()));
 
         rateLimitService.assertAllowed("messages", principal.id(), messagesPerMinute, Duration.ofMinutes(1));
 
